@@ -1,5 +1,6 @@
 pub mod git_reader;
 pub mod git_writer;
+pub mod svn;
 pub mod svn_reader;
 pub mod svn_writer;
 

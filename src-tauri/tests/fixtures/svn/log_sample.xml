@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<log>
+<logentry revision="100">
+<author>alice</author>
+<date>2026-05-10T08:00:00.123456Z</date>
+<msg>Initial import</msg>
+<paths>
+<path action="A" kind="file">/trunk/README.md</path>
+<path action="A" kind="file">/trunk/src/main.rs</path>
+</paths>
+</logentry>
+<logentry revision="101">
+<author>bob</author>
+<date>2026-05-11T09:30:00.000000Z</date>
+<msg>fix: correct typo in readme</msg>
+<paths>
+<path action="M" kind="file">/trunk/README.md</path>
+</paths>
+</logentry>
+<logentry revision="102">
+<author>alice</author>
+<date>2026-05-12T14:15:22.000000Z</date>
+<msg>remove legacy module</msg>
+<paths>
+<path action="D" kind="file">/trunk/legacy/old.rs</path>
+</paths>
+</logentry>
+</log>

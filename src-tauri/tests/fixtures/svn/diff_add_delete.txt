@@ -1,0 +1,15 @@
+Index: trunk/new-file.txt
+===================================================================
+--- trunk/new-file.txt	(revision 101)
++++ trunk/new-file.txt	(revision 102)
+@@ -0,0 +1,2 @@
++hello
++world
+
+Index: trunk/remove-me.txt
+===================================================================
+--- trunk/remove-me.txt	(revision 101)
++++ trunk/remove-me.txt	(revision 102)
+@@ -1,2 +0,0 @@
+-gone
+-also gone

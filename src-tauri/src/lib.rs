@@ -4,7 +4,7 @@ pub mod mapper;
 pub mod model;
 pub mod vcs;
 
-use commands::{preview::build_preview, reader::list_commits, writer::*};
+use commands::{preview::build_preview, reader::*, writer::*};
 
 #[tauri::command]
 fn ping() -> &'static str {
@@ -18,6 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             list_commits,
+            load_changeset,
             build_preview,
             apply_unit,
             commit_resolved,
