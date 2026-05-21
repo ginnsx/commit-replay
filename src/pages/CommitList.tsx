@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { Link } from "react-router-dom";
 import { listCommits } from "../lib/invoke";
 import type { ReplayUnitMeta } from "../lib/types";
 import { useConnectionStore } from "../store/connectionStore";
@@ -121,7 +122,15 @@ export default function CommitList() {
             {loading ? "加载中…" : "拉取提交"}
           </button>
           {selectedRefs.size > 0 && (
-            <span className="text-sm text-gray-400">已选 {selectedRefs.size} 条</span>
+            <>
+              <span className="text-sm text-gray-400">已选 {selectedRefs.size} 条</span>
+              <Link
+                to="/preview"
+                className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-200 hover:border-gray-500 hover:bg-gray-800"
+              >
+                进入预览
+              </Link>
+            </>
           )}
         </div>
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}

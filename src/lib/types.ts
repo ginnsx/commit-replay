@@ -3,6 +3,11 @@
 
 export type VcsKind = "svn" | "git";
 
+export interface PathMapping {
+  from: string;
+  to: string;
+}
+
 export type ReplayPolicy = "fail_stop" | "skip_failed" | "manual_on_fail";
 
 export interface ReplayUnitMeta {

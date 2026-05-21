@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplayUnitMeta } from "../lib/types";
 
@@ -28,11 +29,20 @@ const sampleCommits: ReplayUnitMeta[] = [
   },
 ];
 
+function renderCommitList() {
+  return render(
+    <MemoryRouter>
+      <CommitList />
+    </MemoryRouter>,
+  );
+}
+
 describe("CommitList", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
     useConnectionStore.setState({
       svn: { url: "https://svn.example.com/repo", username: "u", password: "p", limit: 10 },
+      target: { wcPath: "", mappings: [{ from: "/trunk", to: "." }] },
     });
     useSelectionStore.setState({ selectedRefs: new Set() });
   });
@@ -41,7 +51,7 @@ describe("CommitList", () => {
     useConnectionStore.setState({
       svn: { url: "", username: "", password: "", limit: 20 },
     });
-    render(<CommitList />);
+    renderCommitList();
     fireEvent.click(screen.getByRole("button", { name: "拉取提交" }));
     expect(await screen.findByText("请填写 SVN 仓库 URL")).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalled();
@@ -49,7 +59,7 @@ describe("CommitList", () => {
 
   it("renders commits after fetch", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(sampleCommits);
-    render(<CommitList />);
+    renderCommitList();
     fireEvent.click(screen.getByRole("button", { name: "拉取提交" }));
 
     await waitFor(() => {
@@ -68,7 +78,7 @@ describe("CommitList", () => {
 
   it("toggles row selection", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(sampleCommits);
-    render(<CommitList />);
+    renderCommitList();
     fireEvent.click(screen.getByRole("button", { name: "拉取提交" }));
     await waitFor(() => expect(screen.getByText("r101")).toBeInTheDocument());
 
@@ -82,7 +92,7 @@ describe("CommitList", () => {
 
   it("shows error when invoke fails", async () => {
     vi.mocked(invoke).mockRejectedValueOnce("svn connection refused");
-    render(<CommitList />);
+    renderCommitList();
     fireEvent.click(screen.getByRole("button", { name: "拉取提交" }));
     expect(await screen.findByText("svn connection refused")).toBeInTheDocument();
   });

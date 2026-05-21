@@ -70,7 +70,9 @@
 | `SvnReader`（`list_recent` / `load_changeset`） | 已完成 |
 | `list_commits` / `load_changeset` commands | 已完成 |
 | CommitList 页（连接表单 + 列表 + 多选） | 已完成 |
-| `VcsWriter`、Preview、Execute 等 | 未开始 |
+| Preview（映射 + before/after + `git apply --check`） | 已完成 |
+| Preview 页（Monaco diff、文件树、汇总/按提交） | 已完成 |
+| `VcsWriter`、Execute、冲突工作台 等 | 未开始 |
 | SQLite 审计、Monaco diff UI | 未开始 |
 
 本地验证桥接是否正常：运行 `npm run tauri dev`，界面应显示 **Rust bridge: connected**（调用 `ping` command）。

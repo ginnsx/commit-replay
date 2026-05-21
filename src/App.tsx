@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import { ping } from "./lib/invoke";
 import CommitList from "./pages/CommitList";
+import Preview from "./pages/Preview";
 
 function AppShell() {
   const [bridgeStatus, setBridgeStatus] = useState<"checking" | "ok" | "error">("checking");
@@ -19,6 +20,9 @@ function AppShell() {
         <Link to="/" className="text-sm text-gray-400 hover:text-gray-200">
           提交列表
         </Link>
+        <Link to="/preview" className="text-sm text-gray-400 hover:text-gray-200">
+          预览
+        </Link>
         <span className="ml-auto text-xs text-gray-500">
           bridge: {bridgeStatus === "checking" && <span className="text-yellow-400">…</span>}
           {bridgeStatus === "ok" && <span className="text-green-400">ok</span>}
@@ -27,6 +31,7 @@ function AppShell() {
       </nav>
       <Routes>
         <Route path="/" element={<CommitList />} />
+        <Route path="/preview" element={<Preview />} />
       </Routes>
     </div>
   );
