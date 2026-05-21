@@ -2,6 +2,7 @@ pub mod commands;
 pub mod error;
 pub mod mapper;
 pub mod model;
+pub mod preview;
 pub mod vcs;
 
 use commands::{preview::build_preview, reader::*, writer::*};

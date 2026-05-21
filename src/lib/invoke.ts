@@ -1,5 +1,11 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { ChangeSet, PreviewResult, ReplayUnitMeta, ValidationResult } from "./types";
+import type {
+  ChangeSet,
+  PathMapping,
+  PreviewResult,
+  ReplayUnitMeta,
+  ValidationResult,
+} from "./types";
 
 /**
  * Tauri 2 maps Rust snake_case command args to camelCase in invoke payloads.
@@ -47,12 +53,18 @@ export async function buildPreview(
   sourceUrl: string,
   sourceRefs: string[],
   targetWcPath: string,
+  mappings: PathMapping[],
+  username?: string,
+  password?: string,
 ): Promise<PreviewResult> {
   return tauriInvoke("build_preview", {
     sourceVcs,
     sourceUrl,
     sourceRefs,
     targetWcPath,
+    mappings,
+    username: username ?? null,
+    password: password ?? null,
   });
 }
 

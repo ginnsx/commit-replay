@@ -28,6 +28,8 @@ npm run test:integration
 | `vcs/svn/diff_parser.rs` | 解析 `svn diff -c` | `diff_modify.txt`, `diff_add_delete.txt`, `diff_binary.txt` |
 | `vcs/svn/ref_util.rs` | `svn:12345` 引用格式 | 无 |
 | `mapper.rs` | 路径映射 | 无 |
+| `preview/patch_apply.rs` | 内存应用 unified diff | 无 |
+| `preview/service.rs` | 多 unit 按 target_path 聚合 | 无 |
 
 **运行**
 
@@ -88,6 +90,7 @@ cd src-tauri && cargo test --test svn_integration -- --ignored
 
 - `src/lib/types.test.ts` — 类型与模型约定
 - `src/pages/CommitList.test.tsx` — 提交列表 UI
+- `src/pages/Preview.test.tsx` — 预览页（mock `build_preview` + Monaco）
 
 **策略**
 
@@ -110,9 +113,18 @@ npm run test:watch
 | 勾选行 | 已选计数变化 |
 | invoke 失败 | 错误信息展示 |
 
+**Preview 用例说明**
+
+| 用例 | 验证点 |
+|------|--------|
+| 未填工作区路径 | 不调用 `build_preview` |
+| 生成成功 | stats、Monaco diff、`build_preview` 参数含 mappings |
+
 ---
 
-## 4. 手动端到端验证（步骤二）
+## 4. 手动端到端验证（步骤二 + 三）
+
+### 提交列表（步骤二）
 
 在已安装 `svn` 且可访问目标仓库的机器上：
 
@@ -122,20 +134,14 @@ npm run tauri dev
 
 1. 打开「提交列表」，填写 SVN URL、凭据、条数  
 2. 点击「拉取提交」，应出现 revision 列表  
-3. 勾选若干条，确认「已选 N 条」  
+3. 勾选若干条，点击「进入预览」
 
-可选：在 DevTools 控制台调用（需 Tauri 环境）：
+### 变更预览（步骤三）
 
-```javascript
-import { invoke } from "@tauri-apps/api/core";
-await invoke("load_changeset", {
-  source_vcs: "svn",
-  url: "<your-url>",
-  source_ref: "svn:101",
-  username: null,
-  password: null,
-});
-```
+1. 在预览页填写**目标 Git 工作区**本地路径（已 `git clone` 的仓库）  
+2. 配置路径映射（默认 `/trunk` → `.`，按实际仓库调整）  
+3. 点击「生成预览」：左侧文件树，右侧 Monaco before/after diff  
+4. 橙色文件名表示 `git apply --check` 可能冲突  
 
 ---
 
