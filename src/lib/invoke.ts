@@ -1,5 +1,10 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { PreviewResult, ReplayUnitMeta, ValidationResult } from "./types";
+import type { ChangeSet, PreviewResult, ReplayUnitMeta, ValidationResult } from "./types";
+
+/**
+ * Tauri 2 maps Rust snake_case command args to camelCase in invoke payloads.
+ * Use sourceVcs, not source_vcs.
+ */
 
 export async function ping(): Promise<string> {
   return tauriInvoke("ping");
@@ -9,8 +14,32 @@ export async function listCommits(
   sourceVcs: string,
   url: string,
   limit: number,
+  username?: string,
+  password?: string,
 ): Promise<ReplayUnitMeta[]> {
-  return tauriInvoke("list_commits", { source_vcs: sourceVcs, url, limit });
+  return tauriInvoke("list_commits", {
+    sourceVcs,
+    url,
+    limit,
+    username: username ?? null,
+    password: password ?? null,
+  });
+}
+
+export async function loadChangeset(
+  sourceVcs: string,
+  url: string,
+  sourceRef: string,
+  username?: string,
+  password?: string,
+): Promise<ChangeSet> {
+  return tauriInvoke("load_changeset", {
+    sourceVcs,
+    url,
+    sourceRef,
+    username: username ?? null,
+    password: password ?? null,
+  });
 }
 
 export async function buildPreview(
@@ -20,10 +49,10 @@ export async function buildPreview(
   targetWcPath: string,
 ): Promise<PreviewResult> {
   return tauriInvoke("build_preview", {
-    source_vcs: sourceVcs,
-    source_url: sourceUrl,
-    source_refs: sourceRefs,
-    target_wc_path: targetWcPath,
+    sourceVcs,
+    sourceUrl,
+    sourceRefs,
+    targetWcPath,
   });
 }
 
@@ -35,11 +64,11 @@ export async function applyUnit(
   messageTemplate: string,
 ): Promise<string> {
   return tauriInvoke("apply_unit", {
-    source_ref: sourceRef,
-    target_vcs: targetVcs,
-    target_wc_path: targetWcPath,
-    target_branch: targetBranch,
-    message_template: messageTemplate,
+    sourceRef,
+    targetVcs,
+    targetWcPath,
+    targetBranch,
+    messageTemplate,
   });
 }
 
@@ -49,9 +78,9 @@ export async function commitResolved(
   messageTemplate: string,
 ): Promise<ValidationResult> {
   return tauriInvoke("commit_resolved", {
-    source_ref: sourceRef,
-    target_wc_path: targetWcPath,
-    message_template: messageTemplate,
+    sourceRef,
+    targetWcPath,
+    messageTemplate,
   });
 }
 

@@ -67,9 +67,10 @@
 | Tauri + React 脚手架、依赖、lint/test | 已完成 |
 | `model` 数据模型（Rust + TS 类型镜像） | 已完成 |
 | `mapper` 路径映射 + 单元测试 | 已完成 |
-| `VcsReader` / `VcsWriter` trait 与桩实现 | 桩代码，待实现 |
-| Tauri commands（`list_commits`、`build_preview` 等） | 桩代码，返回空数据 |
-| 前端页面（Setup / CommitList / Preview 等） | 目录已预留，仅 `App.tsx` 桥接测试 |
+| `SvnReader`（`list_recent` / `load_changeset`） | 已完成 |
+| `list_commits` / `load_changeset` commands | 已完成 |
+| CommitList 页（连接表单 + 列表 + 多选） | 已完成 |
+| `VcsWriter`、Preview、Execute 等 | 未开始 |
 | SQLite 审计、Monaco diff UI | 未开始 |
 
 本地验证桥接是否正常：运行 `npm run tauri dev`，界面应显示 **Rust bridge: connected**（调用 `ping` command）。
@@ -159,6 +160,8 @@ npm run dev
 npm test && npm run lint && npm run format:check
 cd src-tauri && cargo test && cargo clippy
 ```
+
+测试分层与 SVN 集成测试说明见 [TESTING.md](TESTING.md)。
 
 ---
 
@@ -284,8 +287,11 @@ VCS 差异屏蔽在 **ChangeSet** 层：无论 SVN revision 还是 Git commit，
 
 ### 2. 类型同步
 
-Rust 侧用 `serde` 序列化，字段名默认 **snake_case**（如 `source_ref`）。  
+Rust 侧用 `serde` 序列化，返回值字段名为 **snake_case**（如 `source_ref`）。  
 TypeScript 侧 [`src/lib/types.ts`](src/lib/types.ts) 须与 [`src-tauri/src/model.rs`](src-tauri/src/model.rs) 保持一致。  
+
+**`invoke` 传参**须用 **camelCase**（Tauri 2 约定），例如 `sourceVcs`，不要用 `source_vcs`。见 [`src/lib/invoke.ts`](src/lib/invoke.ts)。  
+
 修改 model 后请同时改两处，并补充/更新测试。
 
 ### 3. 错误处理
