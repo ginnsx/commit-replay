@@ -16,6 +16,9 @@ function App() {
   const [settingsTab, setSettingsTab] = useState("repos");
   const [editors, setEditors] = useState(EDITOR_PRESETS);
   const [selectedEditorId, setSelectedEditorId] = useState("vscode");
+  const [migrationHistory, setMigrationHistory] = useState(INITIAL_MIGRATION_HISTORY);
+  const [historyDetailId, setHistoryDetailId] = useState(null);
+  const [lastMigrationId, setLastMigrationId] = useState(null);
 
   const source = repos.find((r) => r.id === sourceId);
   const target = repos.find((r) => r.id === targetId);
@@ -47,6 +50,40 @@ function App() {
   const handleManageRepos = () => {
     setShowRepos(true);
     setSettingsTab("repos");
+    setHistoryDetailId(null);
+  };
+
+  const openMigrationHistory = (tab = "history", detailId = null) => {
+    setShowRepos(true);
+    setSettingsTab(tab);
+    setHistoryDetailId(detailId);
+  };
+
+  const executeMigration = () => {
+    if (!source || !target) return;
+    const record = {
+      id: `m${Date.now()}`,
+      completedAt: new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"),
+      source: {
+        name: source.name,
+        path: source.path,
+        type: source.type,
+        branch: source.branch,
+      },
+      target: {
+        name: target.name,
+        path: target.path,
+        type: target.type,
+        branch: target.branch,
+      },
+      commits: COMMITS.filter((c) => selectedCommits.has(c.id)),
+      files: FILE_CHANGES,
+      conflictsResolved: resolvedConflicts.size,
+      status: "success",
+    };
+    setMigrationHistory((list) => [record, ...list]);
+    setLastMigrationId(record.id);
+    setMigrated(true);
   };
 
   const saveRepo = (form) => {
@@ -131,7 +168,7 @@ function App() {
           <div className="main-header">
             <div>
               <h1>设置</h1>
-              <p>管理仓库与外部编辑器</p>
+              <p>管理仓库、编辑器与迁移记录</p>
             </div>
           </div>
           <div className="main-content main-content--scroll">
@@ -139,16 +176,23 @@ function App() {
               <button
                 type="button"
                 className={`settings-tab${settingsTab === "repos" ? " active" : ""}`}
-                onClick={() => setSettingsTab("repos")}
+                onClick={() => { setSettingsTab("repos"); setHistoryDetailId(null); }}
               >
                 仓库
               </button>
               <button
                 type="button"
                 className={`settings-tab${settingsTab === "editors" ? " active" : ""}`}
-                onClick={() => setSettingsTab("editors")}
+                onClick={() => { setSettingsTab("editors"); setHistoryDetailId(null); }}
               >
                 编辑器
+              </button>
+              <button
+                type="button"
+                className={`settings-tab${settingsTab === "history" ? " active" : ""}`}
+                onClick={() => { setSettingsTab("history"); setHistoryDetailId(null); }}
+              >
+                迁移记录
               </button>
             </div>
             {settingsTab === "repos" ? (
@@ -158,13 +202,23 @@ function App() {
                 onEdit={(repo) => setModal({ mode: "edit", repo })}
                 onRemove={removeRepo}
               />
-            ) : (
+            ) : settingsTab === "editors" ? (
               <EditorSettings
                 editors={editors}
                 selectedId={selectedEditorId}
                 onSelect={setSelectedEditorId}
                 onAdd={() => setModal({ mode: "editor" })}
                 onRemove={removeEditor}
+              />
+            ) : historyDetailId ? (
+              <MigrationDetail
+                record={migrationHistory.find((r) => r.id === historyDetailId)}
+                onBack={() => setHistoryDetailId(null)}
+              />
+            ) : (
+              <MigrationHistory
+                records={migrationHistory}
+                onSelect={setHistoryDetailId}
               />
             )}
           </div>
@@ -327,9 +381,22 @@ function App() {
                   已将 {selectedCommits.size} 条提交从 <strong>{source?.name}</strong> 成功应用到 <strong>{target?.name}</strong>。
                   共变更 {FILE_CHANGES.length} 个文件。
                 </p>
-                <button className="btn btn-primary" onClick={() => { setMigrated(false); setStep("source"); setSourceId(null); setTargetId(null); setSelectedCommits(new Set()); }}>
-                  开始新的迁移
-                </button>
+                <div className="success-actions">
+                  <button className="btn btn-ghost" onClick={() => openMigrationHistory("history", lastMigrationId)}>
+                    查看本次记录
+                  </button>
+                  <button className="btn btn-primary" onClick={() => {
+                    setMigrated(false);
+                    setStep("source");
+                    setSourceId(null);
+                    setTargetId(null);
+                    setSelectedCommits(new Set());
+                    setResolvedConflicts(new Set());
+                    setLastMigrationId(null);
+                  }}>
+                    开始新的迁移
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -403,9 +470,10 @@ function App() {
 
   const footerHint = () => {
     if (showRepos) {
-      return settingsTab === "repos"
-        ? `${repos.length} 个已保存仓库`
-        : `默认编辑器：${selectedEditor?.name ?? "未选择"}`;
+      if (settingsTab === "repos") return `${repos.length} 个已保存仓库`;
+      if (settingsTab === "editors") return `默认编辑器：${selectedEditor?.name ?? "未选择"}`;
+      if (historyDetailId) return "迁移记录明细";
+      return `${migrationHistory.length} 条迁移记录`;
     }
     if (step === "source" && !sourceId) return "请选择一个源仓库";
     if (step === "commits") return `已选择 ${selectedCommits.size} 条提交`;
@@ -443,7 +511,7 @@ function App() {
                 {showRepos ? (
                   <button className="btn btn-primary" onClick={() => setShowRepos(false)}>返回迁移</button>
                 ) : step === "migrate" ? (
-                  <button className="btn btn-primary" disabled={hasConflicts} onClick={() => setMigrated(true)}>
+                  <button className="btn btn-primary" disabled={hasConflicts} onClick={executeMigration}>
                     执行迁移
                   </button>
                 ) : (

@@ -17,6 +17,19 @@ const IconFolder = () => (
   </svg>
 );
 
+const IconChevronLeft = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <path d="M10 4l-4 4 4 4"/>
+  </svg>
+);
+
+const IconHistory = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="8" cy="8" r="6"/>
+    <path d="M8 4.5V8l2.5 1.5"/>
+  </svg>
+);
+
 const IconChevronRight = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
     <path d="M6 4l4 4-4 4"/>
@@ -104,7 +117,7 @@ const IconChevronDown = () => (
 );
 
 Object.assign(window, {
-  IconGit, IconSvn, IconFolder, IconChevronRight, IconCheck,
+  IconGit, IconSvn, IconFolder, IconChevronRight, IconChevronLeft, IconHistory, IconCheck,
   IconPlus, IconEdit, IconTrash, IconSettings, IconWarn,
   IconArrow, IconClose, IconMin, IconMax, IconSuccess,
   IconExternal, IconChevronDown,
