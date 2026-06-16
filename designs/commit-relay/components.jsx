@@ -1,0 +1,569 @@
+const { useState } = React;
+
+function VcsBadge({ type }) {
+  const isGit = type === "git";
+  return (
+    <span className={`badge ${isGit ? "badge-git" : "badge-svn"}`}>
+      {isGit ? <IconGit /> : <IconSvn />}
+      {isGit ? "Git" : "SVN"}
+    </span>
+  );
+}
+
+function StatusBadge({ status }) {
+  const cls = { add: "badge-add", mod: "badge-mod", del: "badge-del" }[status];
+  return <span className={`badge ${cls}`}>{STATUS_LABELS[status]}</span>;
+}
+
+function TitleBar() {
+  return (
+    <div className="titlebar">
+      <div className="titlebar-drag">
+        <div className="app-logo">R</div>
+        <div className="app-title"><strong>Relay</strong> — 跨仓库提交迁移</div>
+      </div>
+      <div className="win-controls">
+        <button className="win-btn" aria-label="最小化"><IconMin /></button>
+        <button className="win-btn" aria-label="最大化"><IconMax /></button>
+        <button className="win-btn close" aria-label="关闭"><IconClose /></button>
+      </div>
+    </div>
+  );
+}
+
+function StepRail({ steps, current, completed, onStep, onManageRepos, showRepos }) {
+  const stepIndex = steps.findIndex((s) => s.id === current);
+  return (
+    <nav className="step-rail">
+      <div className="step-rail-header">迁移流程</div>
+      <div className="step-list">
+        {steps.map((step, i) => {
+          const done = completed.has(step.id);
+          const active = step.id === current;
+          const reachable = i <= stepIndex || done;
+          return (
+            <button
+              key={step.id}
+              className={`step-item${active ? " active" : ""}${done ? " done" : ""}`}
+              disabled={!reachable && !showRepos}
+              onClick={() => reachable && onStep(step.id)}
+            >
+              <span className="step-num">{done ? <IconCheck /> : step.num}</span>
+              <span className="step-label">{step.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="rail-footer">
+        <button
+          className={`rail-footer-btn${showRepos ? " active" : ""}`}
+          onClick={onManageRepos}
+        >
+          <IconSettings />
+          设置
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function RepoCard({ repo, selected, onClick }) {
+  return (
+    <button className={`repo-card${selected ? " selected" : ""}`} onClick={onClick}>
+      <div className="repo-card-top">
+        <div>
+          <div className="repo-card-name">{repo.name}</div>
+          <div className="repo-card-path">{repo.path}</div>
+        </div>
+        <VcsBadge type={repo.type} />
+      </div>
+      <div className="repo-card-meta">
+        <span>{repo.branch}</span>
+        <span>·</span>
+        <span>最近使用 {repo.lastUsed}</span>
+      </div>
+    </button>
+  );
+}
+
+function CommitRow({ commit, selected, onToggle }) {
+  return (
+    <div className={`commit-row${selected ? " selected" : ""}`} onClick={onToggle}>
+      <div className="commit-check">{selected && <IconCheck />}</div>
+      <span className="commit-hash">{commit.hash}</span>
+      <span className="commit-msg">{commit.msg}</span>
+      <div className="commit-meta">
+        <span>{commit.author}</span>
+        <span>{commit.date}</span>
+        <span>{commit.files} 个文件</span>
+      </div>
+    </div>
+  );
+}
+
+function FileTree({ files, activeId, onSelect }) {
+  const counts = { add: 0, mod: 0, del: 0 };
+  files.forEach((f) => counts[f.status]++);
+  return (
+    <div className="file-tree">
+      <div className="file-tree-header">
+        <span>文件变更</span>
+        <span>
+          <span className="badge badge-add">+{counts.add}</span>{" "}
+          <span className="badge badge-mod">~{counts.mod}</span>{" "}
+          <span className="badge badge-del">−{counts.del}</span>
+        </span>
+      </div>
+      {files.map((f) => (
+        <div
+          key={f.id}
+          className={`file-item${activeId === f.id ? " active" : ""}`}
+          onClick={() => onSelect(f.id)}
+        >
+          <StatusBadge status={f.status} />
+          <span className="file-item-path">{f.path}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DiffView({ file }) {
+  if (!file) {
+    return (
+      <div className="diff-panel">
+        <div className="empty-state"><p>选择左侧文件查看变更详情</p></div>
+      </div>
+    );
+  }
+  return (
+    <div className="diff-panel">
+      <div className="diff-header">
+        <span>{file.path}</span>
+        <StatusBadge status={file.status} />
+      </div>
+      <div className="diff-body">
+        {file.diff.map((line, i) => (
+          <div key={i} className={`diff-line ${line.type}`}>
+            <span className={`diff-ln${line.old ? " old" : ""}`}>{line.old ?? ""}</span>
+            <span className={`diff-ln${line.new ? " new" : ""}`}>{line.new ?? ""}</span>
+            <span className="diff-code">
+              {line.type === "add" ? "+ " : line.type === "del" ? "- " : "  "}
+              {line.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EditorOpenMenu({ editors, selectedId, onSelect, onOpen, onAddCustom, stopPropagation }) {
+  const { useState, useEffect, useRef } = React;
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = editors.find((e) => e.id === selectedId) || editors[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const selectEditor = (id, e) => {
+    if (stopPropagation) e.stopPropagation();
+    onSelect(id);
+    setOpen(false);
+  };
+
+  const openFile = (e) => {
+    if (stopPropagation) e.stopPropagation();
+    if (selectedId || selected?.id) onOpen(selectedId || selected.id);
+  };
+
+  const toggleMenu = (e) => {
+    if (stopPropagation) e.stopPropagation();
+    setOpen((v) => !v);
+  };
+
+  return (
+    <div className="editor-open-menu" ref={ref}>
+      <div className={`editor-open-split${open ? " open" : ""}`}>
+        <button
+          type="button"
+          className="editor-open-main"
+          title={selected ? `用 ${selected.name} 打开` : "用编辑器打开"}
+          onClick={openFile}
+        >
+          <span className="editor-open-label">用 {selected?.name ?? "编辑器"} 打开</span>
+        </button>
+        <button
+          type="button"
+          className="editor-open-chevron"
+          title="选择编辑器"
+          aria-label="选择编辑器"
+          aria-expanded={open}
+          onClick={toggleMenu}
+        >
+          <IconChevronDown />
+        </button>
+      </div>
+      {open && (
+        <div className="editor-open-dropdown">
+          {editors.map((ed) => (
+            <button
+              key={ed.id}
+              type="button"
+              className={`editor-open-item${ed.id === selectedId ? " active" : ""}`}
+              onClick={(e) => selectEditor(ed.id, e)}
+            >
+              {ed.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="editor-open-item editor-open-item-add"
+            onClick={(e) => {
+              if (stopPropagation) e.stopPropagation();
+              setOpen(false);
+              onAddCustom();
+            }}
+          >
+            选择其他应用…
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditorAppModal({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [exe, setExe] = useState("");
+
+  const mockBrowse = () => {
+    setExe("D:\\Tools\\MyEditor\\editor.exe");
+    if (!name) setName("MyEditor");
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>选择编辑器应用</h2>
+          <button className="icon-btn" onClick={onClose}><IconClose /></button>
+        </div>
+        <div className="modal-body">
+          <p className="form-hint" style={{ marginBottom: 4 }}>选择用于打开冲突文件的 .exe 程序，将加入编辑器列表。</p>
+          <div className="form-group">
+            <label>显示名称</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 Vim" />
+          </div>
+          <div className="form-group">
+            <label>应用程序路径</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ flex: 1 }} value={exe} onChange={(e) => setExe(e.target.value)} placeholder="C:\...\editor.exe" />
+              <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={mockBrowse}><IconFolder /> 浏览</button>
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn btn-primary" disabled={!name || !exe} onClick={() => onSave({ name, exe })}>添加</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditorSettings({ editors, selectedId, onSelect, onAdd, onRemove }) {
+  return (
+    <div className="editor-settings" data-screen-label="编辑器设置">
+      <p className="editor-settings-intro">
+        选择默认用于打开冲突文件的外部编辑器。也可添加自定义应用程序。
+      </p>
+      <div className="editor-option-list">
+        {editors.map((ed) => (
+          <button
+            key={ed.id}
+            type="button"
+            className={`editor-option${selectedId === ed.id ? " selected" : ""}`}
+            onClick={() => onSelect(ed.id)}
+          >
+            <span className="editor-option-radio"></span>
+            <span className="editor-option-info">
+              <div className="editor-option-name">{ed.name}</div>
+              <div className="editor-option-exe">{ed.exe}</div>
+            </span>
+            {ed.custom && (
+              <button
+                className="icon-btn danger"
+                title="移除"
+                onClick={(e) => { e.stopPropagation(); onRemove(ed.id); }}
+              >
+                <IconTrash />
+              </button>
+            )}
+          </button>
+        ))}
+      </div>
+      <button className="btn btn-ghost" onClick={onAdd}><IconPlus /> 添加编辑器应用</button>
+    </div>
+  );
+}
+
+function ConflictCompareView({ conflict, targetPath, editors, selectedEditorId, onSelectEditor, onBrowseEditor, onOpenWithEditor, onMarkResolved, resolved }) {
+  const editor = editors.find((e) => e.id === selectedEditorId);
+  if (!conflict) {
+    return (
+      <div className="conflict-compare">
+        <div className="empty-state"><p>选择左侧冲突文件查看两边差异</p></div>
+      </div>
+    );
+  }
+
+  const rows = alignConflictLines(conflict.before, conflict.after);
+  const [lo, hi] = conflict.overlapLines || [];
+
+  return (
+    <div className="conflict-compare">
+      <div className="conflict-compare-toolbar">
+        <span className="conflict-compare-path">{conflict.path}</span>
+        <div className="conflict-compare-actions">
+          <EditorOpenMenu
+            editors={editors}
+            selectedId={selectedEditorId}
+            onSelect={onSelectEditor}
+            onOpen={(editorId) => onOpenWithEditor(conflict, editorId)}
+            onAddCustom={onBrowseEditor}
+          />
+          {!resolved && (
+            <button type="button" className="conflict-action-btn conflict-action-btn--resolve" onClick={() => onMarkResolved(conflict.id)}>
+              <IconCheck />
+              标记已解决
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="conflict-compare-header">
+        <span>目标仓库（当前）</span>
+        <span>迁入变更（期望）</span>
+      </div>
+      <div className="conflict-compare-body">
+        {rows.map((row, i) => {
+          const rowClass = row.kind === "same" ? "" : row.kind;
+          return (
+            <div key={i} className={`conflict-row${rowClass ? ` ${rowClass}` : ""}`}>
+              <div className={`conflict-cell${row.left === null ? " empty" : ""}`}>
+                <span className="conflict-ln">{row.left !== null ? row.lineNo : ""}</span>
+                <span className="conflict-code">{row.left ?? ""}</span>
+              </div>
+              <div className={`conflict-cell${row.right === null ? " empty" : ""}`}>
+                <span className="conflict-ln">{row.right !== null ? row.lineNo : ""}</span>
+                <span className="conflict-code">{row.right ?? ""}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="conflict-compare-hint">
+        {lo && hi
+          ? `高亮行 ${lo}–${hi} 为重叠冲突区域。确认差异后，可在外部编辑器中修改并标记已解决。`
+          : "左右并排对比目标现状与迁入期望。复杂修改可用外部编辑器打开。"}
+        {editor && (
+          <span> 将使用 <code>{editor.name}</code> 打开文件。</span>
+        )}
+        {targetPath && (
+          <span> 文件路径：<code>{targetPath}\\{conflict.path.replace(/\//g, "\\")}</code></span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConflictWorkspace({ conflicts, activeId, resolvedIds, target, editors, selectedEditorId, onSelectEditor, onBrowseEditor, onSelect, onOpenWithEditor, onMarkResolved }) {
+  const active = conflicts.find((c) => c.id === activeId);
+  const pending = conflicts.length - resolvedIds.size;
+
+  return (
+    <div className="conflict-workspace">
+      <div className="conflict-list">
+        {conflicts.map((cf) => {
+          const resolved = resolvedIds.has(cf.id);
+          const active = cf.id === activeId;
+          const { dir, name } = splitFilePath(cf.path);
+          return (
+            <div
+              key={cf.id}
+              className={`conflict-item${resolved ? " resolved" : ""}${active ? " active" : ""}`}
+              onClick={() => onSelect(cf.id)}
+              style={{ cursor: "pointer" }}
+            >
+              <div className="conflict-item-status">{resolved && <IconCheck />}</div>
+              <div className="conflict-item-body">
+                <div className="conflict-item-title">
+                  <StatusBadge status={cf.status} />
+                  <div className="conflict-item-path" title={cf.path}>
+                    <span className="conflict-item-name">{name}</span>
+                    {dir && <span className="conflict-item-dir">{dir}</span>}
+                  </div>
+                </div>
+                <div className="conflict-item-reason" title={cf.reason}>{cf.reason}</div>
+              </div>
+            </div>
+          );
+        })}
+        {pending > 0 && (
+          <p style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 4px 0" }}>
+            还剩 {pending} 处待解决
+          </p>
+        )}
+      </div>
+      <ConflictCompareView
+        conflict={active}
+        targetPath={target?.path}
+        editors={editors}
+        selectedEditorId={selectedEditorId}
+        onSelectEditor={onSelectEditor}
+        onBrowseEditor={onBrowseEditor}
+        onOpenWithEditor={onOpenWithEditor}
+        onMarkResolved={onMarkResolved}
+        resolved={active ? resolvedIds.has(active.id) : false}
+      />
+    </div>
+  );
+}
+
+function Toast({ message, onDone }) {
+  React.useEffect(() => {
+    const t = setTimeout(onDone, 3200);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return <div className="toast">{message}</div>;
+}
+
+function RepoModal({ repo, onClose, onSave }) {
+  const isEdit = !!repo;
+  const [form, setForm] = useState(repo || {
+    name: "", path: "", type: "git", branch: "main", svnUser: "", svnPass: "",
+  });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>{isEdit ? "编辑仓库" : "添加仓库"}</h2>
+          <button className="icon-btn" onClick={onClose}><IconClose /></button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label>显示名称</label>
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="例如 payment-service" />
+          </div>
+          <div className="form-group">
+            <label>本地路径</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ flex: 1 }} value={form.path} onChange={(e) => set("path", e.target.value)} placeholder="D:\Projects\my-repo" />
+              <button className="btn btn-ghost" style={{ flexShrink: 0 }}><IconFolder /> 浏览</button>
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label>版本控制</label>
+              <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+                <option value="git">Git</option>
+                <option value="svn">SVN</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>{form.type === "git" ? "分支" : "路径"}</label>
+              <input value={form.branch} onChange={(e) => set("branch", e.target.value)} placeholder={form.type === "git" ? "main" : "trunk"} />
+            </div>
+          </div>
+          {form.type === "svn" && (
+            <>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>SVN 用户名</label>
+                  <input value={form.svnUser} onChange={(e) => set("svnUser", e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>密码</label>
+                  <input type="password" value={form.svnPass} onChange={(e) => set("svnPass", e.target.value)} placeholder="••••••••" />
+                </div>
+              </div>
+              <p className="form-hint">凭据将加密保存在本地，避免每次重复输入</p>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button className="btn btn-primary" onClick={() => onSave(form)}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
+  const [search, setSearch] = useState("");
+  const filtered = repos.filter((r) =>
+    r.name.toLowerCase().includes(search.toLowerCase()) ||
+    r.path.toLowerCase().includes(search.toLowerCase())
+  );
+  return (
+    <div className="repo-mgmt" data-screen-label="仓库管理">
+      <div className="repo-mgmt-toolbar">
+        <input
+          className="search-input"
+          placeholder="搜索仓库…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button className="btn btn-primary" onClick={onAdd}><IconPlus /> 添加仓库</button>
+      </div>
+      <div className="card">
+        <table className="repo-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>路径</th>
+              <th>类型</th>
+              <th>分支 / 路径</th>
+              <th>最近使用</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((repo) => (
+              <tr key={repo.id}>
+                <td style={{ fontWeight: 600 }}>{repo.name}</td>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-muted)" }}>{repo.path}</td>
+                <td><VcsBadge type={repo.type} /></td>
+                <td>{repo.branch}</td>
+                <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{repo.lastUsed}</td>
+                <td>
+                  <div className="actions">
+                    <button className="icon-btn" title="编辑" onClick={() => onEdit(repo)}><IconEdit /></button>
+                    <button className="icon-btn danger" title="移除" onClick={() => onRemove(repo.id)}><IconTrash /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, {
+  VcsBadge, StatusBadge, TitleBar, StepRail, RepoCard, CommitRow,
+  FileTree, DiffView, EditorOpenMenu, EditorAppModal, EditorSettings,
+  ConflictCompareView, ConflictWorkspace, Toast,
+  RepoModal, RepoManagement,
+});
