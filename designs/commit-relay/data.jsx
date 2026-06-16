@@ -236,7 +236,40 @@ const EDITOR_PRESETS = [
   { id: "pycharm", name: "PyCharm", kind: "pycharm", exe: "C:\\Program Files\\JetBrains\\PyCharm 2024.1\\bin\\pycharm64.exe" },
 ];
 
+const INITIAL_MIGRATION_HISTORY = [
+  {
+    id: "m1",
+    completedAt: "2026-06-14 18:05",
+    source: { name: "payment-service", path: "D:\\Projects\\payment-service", type: "git", branch: "main" },
+    target: { name: "legacy-billing", path: "D:\\SVN\\legacy-billing", type: "svn", branch: "trunk" },
+    commits: [COMMITS[0], COMMITS[1]],
+    files: FILE_CHANGES,
+    conflictsResolved: 2,
+    status: "success",
+  },
+  {
+    id: "m2",
+    completedAt: "2026-06-10 09:30",
+    source: { name: "mobile-gateway", path: "D:\\Projects\\mobile-gateway", type: "git", branch: "develop" },
+    target: { name: "config-center", path: "\\\\fileserver\\svn\\config-center", type: "svn", branch: "branches/release-2.4" },
+    commits: [COMMITS[2], COMMITS[3]],
+    files: [FILE_CHANGES[0], FILE_CHANGES[4]],
+    conflictsResolved: 0,
+    status: "success",
+  },
+];
+
+function migrationStats(files) {
+  return {
+    adds: files.filter((f) => f.status === "add").length,
+    mods: files.filter((f) => f.status === "mod").length,
+    dels: files.filter((f) => f.status === "del").length,
+    additions: files.reduce((s, f) => s + f.additions, 0),
+    deletions: files.reduce((s, f) => s + f.deletions, 0),
+  };
+}
+
 Object.assign(window, {
   INITIAL_REPOS, COMMITS, FILE_CHANGES, CONFLICTS, STEPS, STATUS_LABELS, alignConflictLines,
-  EDITOR_PRESETS, splitFilePath,
+  EDITOR_PRESETS, splitFilePath, INITIAL_MIGRATION_HISTORY, migrationStats,
 });
