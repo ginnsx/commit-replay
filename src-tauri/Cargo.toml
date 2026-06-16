@@ -26,6 +26,7 @@ thiserror = "2"
 
 quick-xml = { version = "0.37", features = ["serialize"] }
 similar = "2"
+encoding_rs = "0.8"
 
 [lints.clippy]
 pedantic = "warn"

@@ -8,6 +8,22 @@ pub struct SvnCredentials {
     pub password: Option<String>,
 }
 
+/// Decode SVN CLI stdout. On Windows, SVN often uses system ANSI (e.g. GBK) for log messages.
+fn decode_svn_output(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+
+    // Typical on zh-CN Windows when commit messages contain non-ASCII.
+    let (decoded, _, had_errors) = encoding_rs::GBK.decode(bytes);
+    if !had_errors {
+        return decoded.into_owned();
+    }
+
+    // Last resort: preserve bytes, avoid hard failure on mixed encodings.
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 /// Run an SVN subcommand and return stdout on success.
 pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("svn");
@@ -32,13 +48,11 @@ pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<Strin
         .map_err(|e| AppError::Vcs(format!("failed to spawn svn: {e}")))?;
 
     if output.status.success() {
-        return String::from_utf8(output.stdout).map_err(|e| {
-            AppError::Vcs(format!("svn output is not valid UTF-8: {e}"))
-        });
+        return Ok(decode_svn_output(&output.stdout));
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = decode_svn_output(&output.stderr);
+    let stdout = decode_svn_output(&output.stdout);
     Err(AppError::Vcs(format!(
         "svn {} failed (exit {:?}): {stderr}{stdout}",
         args.first().copied().unwrap_or(""),
@@ -74,5 +88,18 @@ mod tests {
     fn run_svn_fails_when_svn_missing() {
         let result = Command::new("svn_nonexistent_binary_42").output();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decodes_valid_utf8() {
+        assert_eq!(decode_svn_output(b"<?xml version=\"1.0\"?>"), "<?xml version=\"1.0\"?>");
+    }
+
+    #[test]
+    fn decodes_gbk_when_not_utf8() {
+        // GBK encoding of two Chinese characters commonly used in tests.
+        let gbk = [0xB2, 0xE2, 0xCA, 0xD4];
+        let text = decode_svn_output(&gbk);
+        assert_eq!(text, "测试");
     }
 }

@@ -102,6 +102,13 @@ export default function Preview() {
           </div>
 
           <div>
+            <p className="mb-2 text-xs text-gray-500">
+              将 SVN 路径映射到目标 Git 工作区内路径。若 SVN URL 已是 trunk 目录，diff 常为{" "}
+              <code className="text-gray-400">/src/...</code>，请保留规则{" "}
+              <code className="text-gray-400">/ → .</code>；若路径带{" "}
+              <code className="text-gray-400">/trunk/</code> 前缀则用{" "}
+              <code className="text-gray-400">/trunk → .</code>。
+            </p>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium text-gray-400">路径映射</span>
               <button
