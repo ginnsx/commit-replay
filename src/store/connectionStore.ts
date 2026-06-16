@@ -33,7 +33,11 @@ const defaultSvn: SvnConnection = {
 
 const defaultTarget: TargetConfig = {
   wcPath: "",
-  mappings: [{ from: "/trunk", to: "." }],
+  // When SVN URL already ends at trunk, diff paths are often /src/... not /trunk/src/...
+  mappings: [
+    { from: "/trunk", to: "." },
+    { from: "/", to: "." },
+  ],
 };
 
 export const useConnectionStore = create<ConnectionState>()(

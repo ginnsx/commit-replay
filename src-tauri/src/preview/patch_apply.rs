@@ -5,7 +5,6 @@ pub fn apply_unified_patch(base: Option<&str>, patch: &str) -> Result<String> {
     let mut lines: Vec<String> = base.unwrap_or("").lines().map(String::from).collect();
     let hunks = parse_hunks(patch)?;
 
-    // Apply from bottom to top so line indices stay valid.
     for hunk in hunks.iter().rev() {
         apply_hunk(&mut lines, hunk)?;
     }
@@ -13,9 +12,32 @@ pub fn apply_unified_patch(base: Option<&str>, patch: &str) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
+/// When patch apply fails, build a best-effort "after" from added lines only (preview fallback).
+pub fn extract_added_lines(patch: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_hunk = false;
+    for line in patch.lines() {
+        if line.starts_with("@@") {
+            in_hunk = true;
+            continue;
+        }
+        if !in_hunk {
+            continue;
+        }
+        if line.starts_with("+++ ") || line.starts_with("--- ") || line.starts_with("Index:") {
+            continue;
+        }
+        if line.starts_with('+') {
+            out.push(line[1..].to_string());
+        }
+    }
+    out.join("\n")
+}
+
 #[derive(Debug)]
 struct Hunk {
     old_start: usize,
+    old_count: usize,
     lines: Vec<HunkLine>,
 }
 
@@ -61,27 +83,42 @@ fn parse_hunks(patch: &str) -> Result<Vec<Hunk>> {
 }
 
 fn parse_hunk_header(line: &str) -> Result<Hunk> {
-    // @@ -1,3 +1,3 @@
     let parts: Vec<&str> = line.split_whitespace().collect();
     let old_part = parts
         .iter()
         .find(|p| p.starts_with('-'))
         .ok_or_else(|| AppError::Vcs(format!("invalid hunk header: {line}")))?;
-    let old_range = old_part.trim_start_matches('-');
-    let old_start = old_range
-        .split(',')
-        .next()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(1);
+    let (old_start, old_count) = parse_range(old_part.trim_start_matches('-'));
+
     Ok(Hunk {
         old_start,
+        old_count,
         lines: Vec::new(),
     })
 }
 
+/// Parse `start,count` from hunk range (count defaults to 1; `0,0` means zero old lines).
+fn parse_range(range: &str) -> (usize, usize) {
+    let mut parts = range.split(',');
+    let start = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let count = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    (start, count)
+}
+
 fn apply_hunk(lines: &mut Vec<String>, hunk: &Hunk) -> Result<()> {
-    let mut out: Vec<String> = lines[..hunk.old_start.saturating_sub(1)].to_vec();
-    let mut idx = hunk.old_start.saturating_sub(1);
+    // @@ -0,0 +1,N @@ — pure addition, ignore old line numbers.
+    if hunk.old_count == 0 {
+        for hl in &hunk.lines {
+            if let HunkLine::Add(s) = hl {
+                lines.push(s.clone());
+            }
+        }
+        return Ok(());
+    }
+
+    let start_idx = hunk.old_start.saturating_sub(1).min(lines.len());
+    let mut out = lines[..start_idx].to_vec();
+    let mut idx = start_idx;
 
     for hl in &hunk.lines {
         match hl {
@@ -126,5 +163,12 @@ mod tests {
         let patch = "@@ -0,0 +1,2 @@\n+line1\n+line2\n";
         let out = apply_unified_patch(None, patch).unwrap();
         assert_eq!(out, "line1\nline2");
+    }
+
+    #[test]
+    fn large_old_start_on_empty_base_does_not_panic() {
+        let patch = "@@ -2576,5 +2576,6 @@\n+only new line\n";
+        let out = apply_unified_patch(None, patch).unwrap();
+        assert_eq!(out, "only new line");
     }
 }

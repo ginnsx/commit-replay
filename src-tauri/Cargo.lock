@@ -499,6 +499,7 @@ name = "copy-diff"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "encoding_rs",
  "quick-xml 0.37.5",
  "serde",
  "serde_json",
