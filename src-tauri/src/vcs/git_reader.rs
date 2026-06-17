@@ -10,8 +10,10 @@ use super::git::{
     log_parser::parse_git_log,
     ref_util::parse_git_revision,
 };
+use super::svn_reader::tag_source_ref;
 use super::VcsReader;
 
+#[derive(Clone)]
 pub struct GitReader {
     pub repo_path: String,
 }
@@ -102,6 +104,7 @@ pub fn load_changeset_with_meta(reader: &GitReader, meta: ReplayUnitMeta) -> Res
     let sha = parse_git_revision(&meta.source_ref)?;
     let diff = reader.run_git(&["show", "--format=", "--patch", &sha])?;
     let mut files = parse_unified_diff(&diff, Some(&reader.repo_path))?;
+    tag_source_ref(&mut files, &meta.source_ref);
 
     for fc in &mut files {
         if fc.kind == crate::model::FileChangeKind::Binary {

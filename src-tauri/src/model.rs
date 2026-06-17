@@ -61,6 +61,8 @@ pub struct FileChange {
     pub after: Option<String>,
     /// Post-change content on the source side (e.g. svn cat @ revision)
     pub source_after: Option<String>,
+    /// Source commit ref for lazy source_after loading
+    pub source_ref: Option<String>,
     /// Raw unified diff hunk (text files only)
     pub patch: Option<String>,
     pub conflict_risk: Option<ConflictRisk>,

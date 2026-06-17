@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DiffLine, Editor, IntegrationItemView, MigrationMode, Repo } from "../../lib/types";
-import { splitFilePath, targetFilePath } from "../../lib/constants";
-import { StatusBadge } from "./Badges";
+import { targetFilePath } from "../../lib/constants";
 import { IconCheck, IconChevronDown } from "./icons";
+import { IntegrationFileList } from "./IntegrationFileList";
 
 const MODE_LABELS: Record<MigrationMode, string> = {
   incremental_first: "增量优先",
@@ -230,94 +230,6 @@ function IntegrationCompareView({
   );
 }
 
-function statusLabel(status: IntegrationItemView["integrationStatus"]) {
-  if (status === "review") return "需确认";
-  if (status === "blocked") return "需处理";
-  return "可自动";
-}
-
-function IntegrationFileRow({
-  item,
-  activeId,
-  acceptedReviewIds,
-  resolvedBlockedIds,
-  onSelect,
-}: {
-  item: IntegrationItemView;
-  activeId: string | null;
-  acceptedReviewIds: Set<string>;
-  resolvedBlockedIds: Set<string>;
-  onSelect: (id: string) => void;
-}) {
-  const { dir, name } = splitFilePath(item.path);
-  const isReview = item.integrationStatus === "review";
-  const done = isReview
-    ? acceptedReviewIds.has(item.id)
-    : item.integrationStatus === "blocked"
-      ? resolvedBlockedIds.has(item.id)
-      : false;
-
-  return (
-    <button
-      type="button"
-      className={`conflict-item${item.id === activeId ? " active" : ""}${done ? " resolved" : ""}`}
-      onClick={() => onSelect(item.id)}
-    >
-      <div className="conflict-item-status">{done && <IconCheck />}</div>
-      <div className="conflict-item-body">
-        <div className="conflict-item-title">
-          <StatusBadge status={item.status} />
-          <span className={`integration-badge integration-badge--${item.integrationStatus}`}>
-            {statusLabel(item.integrationStatus)}
-          </span>
-          <div className="conflict-item-path" title={item.path}>
-            <span className="conflict-item-name">{name}</span>
-            <span className="conflict-item-dir">{dir}</span>
-          </div>
-        </div>
-        <div className="conflict-item-reason" title={item.reason}>
-          {item.reason}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function IntegrationSection({
-  title,
-  count,
-  tone,
-  defaultCollapsed = false,
-  children,
-}: {
-  title: string;
-  count: number;
-  tone: "auto_ok" | "review" | "blocked";
-  defaultCollapsed?: boolean;
-  children: ReactNode;
-}) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
-  if (count === 0) return null;
-
-  return (
-    <div className={`integration-section integration-section--${tone}`}>
-      <button
-        type="button"
-        className="integration-section-header"
-        onClick={() => setCollapsed((v) => !v)}
-        aria-expanded={!collapsed}
-      >
-        <span className={`integration-section-chevron${collapsed ? "" : " open"}`}>
-          <IconChevronDown />
-        </span>
-        <span className="integration-section-title">{title}</span>
-        <span className="integration-section-count">{count}</span>
-      </button>
-      {!collapsed && <div className="integration-section-body">{children}</div>}
-    </div>
-  );
-}
-
 export function ConflictWorkspace({
   items,
   migrationMode,
@@ -362,11 +274,12 @@ export function ConflictWorkspace({
   canExecute: boolean;
 }) {
   const active = items.find((c) => c.id === activeId);
-  const autoOkItems = items.filter((i) => i.integrationStatus === "auto_ok");
-  const reviewItems = items.filter((i) => i.integrationStatus === "review");
-  const blockedItems = items.filter((i) => i.integrationStatus === "blocked");
-  const pendingReview = reviewItems.filter((i) => !acceptedReviewIds.has(i.id)).length;
-  const pendingBlocked = blockedItems.filter((i) => !resolvedBlockedIds.has(i.id)).length;
+  const pendingReview = items.filter(
+    (i) => i.integrationStatus === "review" && !acceptedReviewIds.has(i.id),
+  ).length;
+  const pendingBlocked = items.filter(
+    (i) => i.integrationStatus === "blocked" && !resolvedBlockedIds.has(i.id),
+  ).length;
 
   return (
     <div className="integration-workspace">
@@ -410,53 +323,13 @@ export function ConflictWorkspace({
         </div>
       </div>
       <div className="conflict-workspace">
-        <div className="conflict-list card integration-file-list">
-          <IntegrationSection
-            title="需人工处理"
-            count={blockedItems.length}
-            tone="blocked"
-          >
-            {blockedItems.map((item) => (
-              <IntegrationFileRow
-                key={item.id}
-                item={item}
-                activeId={activeId}
-                acceptedReviewIds={acceptedReviewIds}
-                resolvedBlockedIds={resolvedBlockedIds}
-                onSelect={onSelect}
-              />
-            ))}
-          </IntegrationSection>
-          <IntegrationSection title="需确认" count={reviewItems.length} tone="review">
-            {reviewItems.map((item) => (
-              <IntegrationFileRow
-                key={item.id}
-                item={item}
-                activeId={activeId}
-                acceptedReviewIds={acceptedReviewIds}
-                resolvedBlockedIds={resolvedBlockedIds}
-                onSelect={onSelect}
-              />
-            ))}
-          </IntegrationSection>
-          <IntegrationSection
-            title="可自动应用"
-            count={autoOkItems.length}
-            tone="auto_ok"
-            defaultCollapsed
-          >
-            {autoOkItems.map((item) => (
-              <IntegrationFileRow
-                key={item.id}
-                item={item}
-                activeId={activeId}
-                acceptedReviewIds={acceptedReviewIds}
-                resolvedBlockedIds={resolvedBlockedIds}
-                onSelect={onSelect}
-              />
-            ))}
-          </IntegrationSection>
-        </div>
+        <IntegrationFileList
+          items={items}
+          activeId={activeId}
+          acceptedReviewIds={acceptedReviewIds}
+          resolvedBlockedIds={resolvedBlockedIds}
+          onSelect={onSelect}
+        />
         {active ? (
           <IntegrationCompareView
             item={active}

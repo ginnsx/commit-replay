@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AppErrorPayload,
   Editor,
@@ -13,7 +13,7 @@ import type {
   RepoInput,
   WizardStep,
 } from "./lib/types";
-import { STEPS, COMMIT_FETCH_SIZE, COMMIT_PAGE_SIZE, defaultMappingsForSource, targetFilePath } from "./lib/constants";
+import { STEPS, COMMIT_FETCH_SIZE, defaultMappingsForSource, targetFilePath } from "./lib/constants";
 import {
   buildPreviewMeta,
   buildIntegrationPlan,
@@ -88,6 +88,8 @@ export default function App() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [activeFile, setActiveFile] = useState<FileChangeView | null>(null);
+  const fileDiffCacheRef = useRef(new Map<string, FileChangeView>());
+  const fileDiffScopeRef = useRef("");
 
   const [integrationPlan, setIntegrationPlan] = useState<IntegrationPlanResult | null>(null);
   const [migrationMode, setMigrationMode] = useState<MigrationMode>("incremental_first");
@@ -128,10 +130,15 @@ export default function App() {
 
   const canExecuteMigration = pendingReview.length === 0 && pendingBlocked.length === 0;
 
-  const sourceRefs = useMemo(
-    () => commits.filter((c) => selectedCommits.has(c.id)).map((c) => c.sourceRef),
-    [commits, selectedCommits],
-  );
+  const sourceRefs = useMemo(() => {
+    if (step !== "preview" && step !== "migrate") return [];
+    if (selectedCommits.size === 0) return [];
+    const refs: string[] = [];
+    for (const commit of commits) {
+      if (selectedCommits.has(commit.id)) refs.push(commit.sourceRef);
+    }
+    return refs;
+  }, [step, commits, selectedCommits]);
 
   const activeMappings = useMemo(() => {
     if (!source) return [];
@@ -283,6 +290,18 @@ export default function App() {
     }
   }, [sourceId, targetId, sourceRefs, activeMappings]);
 
+  const previewDiffScope = useMemo(() => {
+    if (!sourceId || !targetId) return "";
+    return `${sourceId}|${targetId}|${sourceRefs.join("\0")}|${JSON.stringify(activeMappings)}`;
+  }, [sourceId, targetId, sourceRefs, activeMappings]);
+
+  useEffect(() => {
+    if (previewDiffScope !== fileDiffScopeRef.current) {
+      fileDiffCacheRef.current.clear();
+      fileDiffScopeRef.current = previewDiffScope;
+    }
+  }, [previewDiffScope]);
+
   useEffect(() => {
     if (step === "preview" && sourceId && targetId) {
       loadPreview();
@@ -292,17 +311,28 @@ export default function App() {
   useEffect(() => {
     if (!activeFileId || !sourceId || !targetId || sourceRefs.length === 0) {
       setActiveFile(null);
-      return;
+      return undefined;
     }
-    const metaFile = previewMeta?.files.find((f) => f.id === activeFileId);
-    if (metaFile?.diff) {
-      setActiveFile(metaFile);
-      return;
+
+    const cached = fileDiffCacheRef.current.get(activeFileId);
+    if (cached) {
+      setActiveFile(cached);
+      return undefined;
     }
+
+    let cancelled = false;
     getFileDiff(sourceId, targetId, sourceRefs, activeFileId, activeMappings)
-      .then(setActiveFile)
+      .then((file) => {
+        if (cancelled) return;
+        fileDiffCacheRef.current.set(activeFileId, file);
+        setActiveFile(file);
+      })
       .catch((e: AppErrorPayload) => setToast(<span>{e.message}</span>));
-  }, [activeFileId, sourceId, targetId, sourceRefs, previewMeta, activeMappings]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFileId, sourceId, targetId, sourceRefs, activeMappings, previewDiffScope]);
 
   const loadIntegrationPlan = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
@@ -489,16 +519,16 @@ export default function App() {
     setMigrationMode(mode);
   };
 
-  const toggleCommit = (id: string) => {
+  const toggleCommit = useCallback((id: string) => {
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const selectCommits = (ids: string[], select: boolean) => {
+  const selectCommits = useCallback((ids: string[], select: boolean) => {
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => {
@@ -507,7 +537,7 @@ export default function App() {
       });
       return next;
     });
-  };
+  }, []);
 
   const resetMigration = () => {
     setMigrated(false);
@@ -643,7 +673,7 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div className="main-content main-content--scroll">
+          <div className="main-content main-content--commits">
             {commitsError && (
               <div className="conflict-banner">
                 <p>{commitsError.message}</p>
@@ -656,7 +686,6 @@ export default function App() {
             )}
             <CommitPicker
               commits={commits}
-              pageSize={COMMIT_PAGE_SIZE}
               selectedIds={selectedCommits}
               onToggle={toggleCommit}
               onSelectMany={selectCommits}
@@ -700,7 +729,10 @@ export default function App() {
                 </div>
                 <div className="preview-layout">
                   <FileTree files={files} activeId={activeFileId} onSelect={setActiveFileId} />
-                  <DiffView file={activeFile} />
+                  <DiffView
+                    file={activeFile?.id === activeFileId ? activeFile : null}
+                    loading={!!activeFileId && activeFile?.id !== activeFileId}
+                  />
                 </div>
               </>
             )}
@@ -821,7 +853,7 @@ export default function App() {
               <p>审查集成计划，确认后执行迁移</p>
             </div>
           </div>
-          <div className="main-content">
+          <div className="main-content main-content--commits">
             {planLoading ? (
               <div className="empty-state"><p>生成集成计划中…</p></div>
             ) : integrationPlan ? (

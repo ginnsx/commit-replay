@@ -29,6 +29,7 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                     before: None,
                     after: None,
                     source_after: None,
+                    source_ref: None,
                     patch: None,
                     conflict_risk: None,
                 });
@@ -49,6 +50,7 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                 before: None,
                 after: None,
                 source_after: None,
+                source_ref: None,
                 patch: patch_body,
                 conflict_risk: None,
             });

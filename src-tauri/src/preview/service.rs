@@ -168,7 +168,12 @@ pub fn build_preview_plan(
 
         mapper.apply_to_files(&mut changeset.files)?;
 
-        enrich_files(ctx.target_kind, &ctx.target_wc_path, &mut changeset.files)?;
+        enrich_files(
+            ctx.target_kind,
+            &ctx.target_wc_path,
+            &mut changeset.files,
+            &ctx.reader,
+        )?;
 
         units.push(PreviewUnit {
 
@@ -252,6 +257,8 @@ pub fn build_preview_plan_parallel(
 
     let target_kind = ctx.target_kind;
 
+    let reader = ctx.reader.clone();
+
 
 
     let mut units: Vec<PreviewUnit> = source_refs
@@ -260,11 +267,11 @@ pub fn build_preview_plan_parallel(
 
         .map(|source_ref| {
 
-            let mut changeset = ctx.reader.load_changeset(source_ref)?;
+            let mut changeset = reader.load_changeset(source_ref)?;
 
             mapper.apply_to_files(&mut changeset.files)?;
 
-            enrich_files(target_kind, &target_wc_path, &mut changeset.files)?;
+            enrich_files(target_kind, &target_wc_path, &mut changeset.files, &reader)?;
 
             Ok(PreviewUnit {
 
@@ -310,6 +317,48 @@ pub fn get_aggregated_files(ctx: &PreviewContext, source_refs: &[String]) -> Res
 
     Ok(preview.aggregated)
 
+}
+
+pub fn get_aggregated_files_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+    build_preview_plan_meta(ctx, source_refs)
+}
+
+pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+    use rayon::prelude::*;
+
+    if source_refs.is_empty() {
+        return Err(AppError::Vcs("no source revisions selected".into()));
+    }
+    if ctx.target_wc_path.trim().is_empty() {
+        return Err(AppError::Vcs("target working copy path is empty".into()));
+    }
+
+    let mapper = Mapper::new(
+        ctx.mappings
+            .iter()
+            .map(|m| PathMapping {
+                from: m.from.clone(),
+                to: m.to.clone(),
+            })
+            .collect(),
+    );
+
+    let reader = ctx.reader.clone();
+
+    let mut units: Vec<PreviewUnit> = source_refs
+        .par_iter()
+        .map(|source_ref| {
+            let mut changeset = reader.load_changeset_meta(source_ref)?;
+            mapper.apply_to_files(&mut changeset.files)?;
+            Ok(PreviewUnit {
+                meta: changeset.meta,
+                files: changeset.files,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    units.sort_by(|a, b| a.meta.source_ref.cmp(&b.meta.source_ref));
+    Ok(aggregate_by_target_path(&units))
 }
 
 
@@ -469,6 +518,7 @@ mod tests {
                     after: Some("v2".into()),
 
                     source_after: None,
+                    source_ref: None,
 
                     patch: None,
 
@@ -497,6 +547,7 @@ mod tests {
                     after: Some("v3".into()),
 
                     source_after: None,
+                    source_ref: None,
 
                     patch: None,
 

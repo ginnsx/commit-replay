@@ -15,6 +15,7 @@ use commands::{
     settings::*,
     writer::{open_file_in_editor, open_file_in_system},
 };
+use preview::PreviewCache;
 use store::db::{init_db, DbState};
 use tauri::Manager;
 
@@ -31,6 +32,7 @@ pub fn run() {
         .setup(|app| {
             let conn = init_db(&app.handle())?;
             app.manage(DbState(std::sync::Mutex::new(conn)));
+            app.manage(PreviewCache::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
