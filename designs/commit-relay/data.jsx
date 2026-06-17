@@ -35,48 +35,49 @@ const INITIAL_REPOS = [
   },
 ];
 
-const COMMITS = [
-  {
-    id: "c1",
-    hash: "a3f8c21",
-    msg: "fix: 修复支付回调超时重试逻辑",
-    author: "张伟",
-    date: "2026-06-14 16:32",
-    files: 3,
-  },
-  {
-    id: "c2",
-    hash: "7b2e9d0",
-    msg: "feat: 新增支付宝沙箱环境配置项",
-    author: "李娜",
-    date: "2026-06-13 11:08",
-    files: 5,
-  },
-  {
-    id: "c3",
-    hash: "e1c4f88",
-    msg: "refactor: 抽取 PaymentClient 公共接口",
-    author: "张伟",
-    date: "2026-06-12 09:45",
-    files: 8,
-  },
-  {
-    id: "c4",
-    hash: "9d0a1b2",
-    msg: "chore: 升级 spring-boot 至 3.2.5",
-    author: "王磊",
-    date: "2026-06-10 14:20",
-    files: 2,
-  },
-  {
-    id: "c5",
-    hash: "f5e6d7c",
-    msg: "fix: 订单状态机并发竞态条件",
-    author: "李娜",
-    date: "2026-06-09 17:55",
-    files: 4,
-  },
+const COMMIT_PAGE_SIZE = 8;
+
+const COMMIT_MSGS = [
+  "fix: 修复支付回调超时重试逻辑",
+  "feat: 新增支付宝沙箱环境配置项",
+  "refactor: 抽取 PaymentClient 公共接口",
+  "chore: 升级 spring-boot 至 3.2.5",
+  "fix: 订单状态机并发竞态条件",
+  "feat: 支持微信退款异步通知",
+  "fix: 修复对账文件编码问题",
+  "refactor: 统一异常处理中间件",
+  "chore: 更新依赖安全补丁",
+  "feat: 新增支付渠道健康检查",
+  "fix: 修复分页查询越界",
+  "docs: 补充 API 接入说明",
+  "test: 补充回调重试单测",
+  "fix: 修复 SVN 合并后路径映射",
+  "feat: 增加批量导入订单接口",
+  "refactor: 拆分结算模块配置",
+  "fix: 修复空指针导致的回调失败",
+  "chore: 调整日志级别与格式",
+  "feat: 支持多租户配置隔离",
+  "fix: 修复并发下重复提交",
+  "perf: 优化热点查询缓存",
+  "feat: 新增风控规则开关",
+  "fix: 修复时区导致的账期错误",
+  "refactor: 提取公共 DTO 校验器",
+  "chore: 清理废弃配置项",
 ];
+
+const COMMITS = COMMIT_MSGS.map((msg, i) => {
+  const day = 14 - Math.floor(i / 2);
+  const hour = 9 + (i % 8);
+  const authors = ["张伟", "李娜", "王磊", "陈静"];
+  return {
+    id: `c${i + 1}`,
+    hash: `${(0xa3f8c21 + i * 0x111111).toString(16).slice(0, 7)}`,
+    msg,
+    author: authors[i % authors.length],
+    date: `2026-06-${String(Math.max(day, 1)).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${String((i * 7) % 60).padStart(2, "0")}`,
+    files: (i % 6) + 2,
+  };
+});
 
 const FILE_CHANGES = [
   {
@@ -270,6 +271,6 @@ function migrationStats(files) {
 }
 
 Object.assign(window, {
-  INITIAL_REPOS, COMMITS, FILE_CHANGES, CONFLICTS, STEPS, STATUS_LABELS, alignConflictLines,
+  INITIAL_REPOS, COMMITS, COMMIT_PAGE_SIZE, FILE_CHANGES, CONFLICTS, STEPS, STATUS_LABELS, alignConflictLines,
   EDITOR_PRESETS, splitFilePath, INITIAL_MIGRATION_HISTORY, migrationStats,
 });

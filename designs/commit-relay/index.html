@@ -393,6 +393,99 @@
     }
 
     .commit-list { display: flex; flex-direction: column; gap: 4px; }
+    .commit-picker { padding: 0; overflow: hidden; }
+    .commit-picker-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-raised);
+    }
+    .commit-search {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      height: 34px;
+      background: var(--bg-base);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .commit-search:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-dim);
+    }
+    .commit-search svg:first-child {
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .commit-search-input {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      background: transparent;
+      padding: 0;
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      box-shadow: none;
+    }
+    .commit-search-input:focus {
+      border: none;
+      box-shadow: none;
+    }
+    .commit-search-clear {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: background 0.1s, color 0.1s;
+    }
+    .commit-search-clear:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+    .commit-picker .commit-list { padding: 8px; }
+    .commit-picker-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-raised);
+    }
+    .commit-picker-count {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .commit-load-more {
+      font-size: 12px;
+      padding: 5px 12px;
+      flex-shrink: 0;
+    }
+    .commit-load-more.loading {
+      opacity: 0.7;
+      cursor: wait;
+    }
+    .commit-picker-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 40px 20px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
     .commit-row {
       display: flex;
       align-items: flex-start;

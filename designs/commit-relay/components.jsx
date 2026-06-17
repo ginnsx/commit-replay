@@ -86,6 +86,112 @@ function RepoCard({ repo, selected, onClick }) {
   );
 }
 
+function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }) {
+  const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(pageSize);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const q = search.trim().toLowerCase();
+  const filtered = commits.filter((c) => {
+    if (!q) return true;
+    return (
+      c.hash.toLowerCase().includes(q) ||
+      c.msg.toLowerCase().includes(q) ||
+      c.author.toLowerCase().includes(q) ||
+      c.date.includes(q)
+    );
+  });
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+  const allFilteredSelected = filtered.length > 0 && filtered.every((c) => selectedIds.has(c.id));
+
+  React.useEffect(() => {
+    setVisibleCount(pageSize);
+  }, [q, pageSize]);
+
+  const toggleSelectFiltered = () => {
+    if (allFilteredSelected) {
+      onSelectMany(filtered.map((c) => c.id), false);
+    } else {
+      onSelectMany(filtered.map((c) => c.id), true);
+    }
+  };
+
+  const loadMore = () => {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    window.setTimeout(() => {
+      setVisibleCount((n) => Math.min(n + pageSize, filtered.length));
+      setLoadingMore(false);
+    }, 420);
+  };
+
+  return (
+    <div className="card commit-picker">
+      <div className="commit-picker-toolbar">
+        <div className="commit-search">
+          <IconSearch />
+          <input
+            className="commit-search-input"
+            placeholder="搜索 hash、说明、作者…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button type="button" className="commit-search-clear" aria-label="清除搜索" onClick={() => setSearch("")}>
+              <IconClose />
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={filtered.length === 0}
+          onClick={toggleSelectFiltered}
+        >
+          {allFilteredSelected ? "取消全选" : "全选"}
+        </button>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="commit-picker-empty">
+          <p>没有匹配的提交</p>
+          <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSearch("")}>
+            清除搜索
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="commit-list">
+            {visible.map((c) => (
+              <CommitRow
+                key={c.id}
+                commit={c}
+                selected={selectedIds.has(c.id)}
+                onToggle={() => onToggle(c.id)}
+              />
+            ))}
+          </div>
+          <div className="commit-picker-footer">
+            <span className="commit-picker-count">
+              已显示 {visible.length} / {filtered.length} 条
+              {q ? `（共 ${commits.length} 条）` : ""}
+            </span>
+            {hasMore && (
+              <button
+                type="button"
+                className={`btn btn-ghost commit-load-more${loadingMore ? " loading" : ""}`}
+                disabled={loadingMore}
+                onClick={loadMore}
+              >
+                {loadingMore ? "加载中…" : `加载更多（${Math.min(pageSize, filtered.length - visible.length)} 条）`}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CommitRow({ commit, selected, onToggle }) {
   return (
     <div className={`commit-row${selected ? " selected" : ""}`} onClick={onToggle}>
@@ -750,7 +856,7 @@ function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
 }
 
 Object.assign(window, {
-  VcsBadge, StatusBadge, TitleBar, StepRail, RepoCard, CommitRow, CommitRowReadonly,
+  VcsBadge, StatusBadge, TitleBar, StepRail, RepoCard, CommitRow, CommitPicker, CommitRowReadonly,
   FileTree, DiffView, EditorOpenMenu, EditorAppModal, EditorSettings,
   ConflictCompareView, ConflictWorkspace, Toast,
   RepoModal, RepoManagement, MigrationHistory, MigrationDetail,
