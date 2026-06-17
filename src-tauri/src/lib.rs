@@ -48,6 +48,7 @@ pub fn run() {
             relay_save_migration_record,
             relay_pick_folder,
             relay_probe_svn_wc,
+            relay_probe_git_repo,
             list_repo_commits,
             load_changeset,
             validate_migration_combo,

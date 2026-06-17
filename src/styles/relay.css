@@ -1106,13 +1106,19 @@
       border-radius: 50%;
       background: var(--accent);
     }
-    .editor-option-info { flex: 1; min-width: 0; }
-    .editor-option-name { font-weight: 600; font-size: 13px; }
+    .editor-option-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .editor-option-name { font-weight: 600; font-size: 13px; display: block; }
     .editor-option-exe {
+      display: block;
       font-family: var(--mono);
       font-size: 11px;
       color: var(--text-muted);
-      margin-top: 2px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;

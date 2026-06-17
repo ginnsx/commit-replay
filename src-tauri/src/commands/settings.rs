@@ -86,8 +86,7 @@ pub async fn relay_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, 
     Ok(path.map(|p| p.to_string()))
 }
 
-#[tauri::command]
-pub fn relay_probe_svn_wc(path: String) -> Result<crate::vcs::svn::SvnWcInfo, AppError> {
+fn validate_probe_path(path: &str) -> Result<&str, AppError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err(AppError::Validation("path is required".into()));
@@ -98,5 +97,15 @@ pub fn relay_probe_svn_wc(path: String) -> Result<crate::vcs::svn::SvnWcInfo, Ap
             format!("path not found: {trimmed}"),
         )));
     }
-    crate::vcs::svn::probe_svn_wc(trimmed)
+    Ok(trimmed)
+}
+
+#[tauri::command]
+pub fn relay_probe_svn_wc(path: String) -> Result<crate::vcs::svn::SvnWcInfo, AppError> {
+    crate::vcs::svn::probe_svn_wc(validate_probe_path(&path)?)
+}
+
+#[tauri::command]
+pub fn relay_probe_git_repo(path: String) -> Result<crate::vcs::GitRepoInfo, AppError> {
+    crate::vcs::probe_git_repo(validate_probe_path(&path)?)
 }

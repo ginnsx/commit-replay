@@ -13,6 +13,12 @@ export interface SvnWcInfo {
   url: string;
 }
 
+export interface GitRepoInfo {
+  branch: string;
+  branches: string[];
+  remoteUrl?: string;
+}
+
 export interface Repo {
   id: string;
   name: string;

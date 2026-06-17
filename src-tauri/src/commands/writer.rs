@@ -17,6 +17,7 @@ pub fn open_file_in_editor(
         .iter()
         .find(|e| e.id == editor_id)
         .ok_or_else(|| AppError::Validation("editor not found".into()))?;
+    let exe = crate::store::editor_paths::resolve_editor_exe(&editor.kind, &editor.exe);
 
     let path = std::path::Path::new(&file_path);
     if !path.exists() {
@@ -27,17 +28,17 @@ pub fn open_file_in_editor(
     }
 
     let status = match editor.kind.as_str() {
-        "explorer" => Command::new(&editor.exe)
+        "explorer" => Command::new(&exe)
             .arg("/select,")
             .arg(&file_path)
             .status(),
-        "gitbash" => Command::new(&editor.exe)
+        "gitbash" => Command::new(&exe)
             .args(["-c", &format!("start '' '{file_path}'")])
             .status(),
-        "terminal" => Command::new(&editor.exe)
+        "terminal" => Command::new(&exe)
             .args(["-d", std::path::Path::new(&file_path).parent().unwrap_or(path).to_str().unwrap_or(".")])
             .status(),
-        _ => Command::new(&editor.exe).arg(&file_path).status(),
+        _ => Command::new(&exe).arg(&file_path).status(),
     }
     .map_err(|e| AppError::Io(e))?;
 

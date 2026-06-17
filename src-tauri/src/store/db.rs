@@ -245,9 +245,10 @@ pub fn list_editors(conn: &Connection) -> Result<Vec<EditorRecord>> {
     let mut editors = Vec::new();
     for row in rows {
         let data = row.map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
-        editors.push(
-            serde_json::from_str(&data).map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?,
-        );
+        let mut editor: EditorRecord =
+            serde_json::from_str(&data).map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+        editor.exe = super::editor_paths::resolve_editor_exe(&editor.kind, &editor.exe);
+        editors.push(editor);
     }
     Ok(editors)
 }
