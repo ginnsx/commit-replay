@@ -52,7 +52,6 @@ import {
   IconChevronRight,
   IconPlus,
   IconSuccess,
-  IconWarn,
 } from "./components/relay/icons";
 import type { CommitListItem } from "./lib/types";
 
@@ -127,7 +126,6 @@ export default function App() {
   const selectedEditor = editors.find((e) => e.id === selectedEditorId);
 
   const canExecuteMigration = pendingReview.length === 0 && pendingBlocked.length === 0;
-  const needsAttention = attentionItems.length > 0;
 
   const sourceRefs = useMemo(
     () => commits.filter((c) => selectedCommits.has(c.id)).map((c) => c.sourceRef),
@@ -266,10 +264,12 @@ export default function App() {
       setIntegrationPlan(plan);
       setAcceptedReviewIds(new Set());
       setResolvedBlockedIds(new Set());
-      const attention = plan.items.filter(
-        (i) => i.integrationStatus === "review" || i.integrationStatus === "blocked",
+      setActiveConflictId(
+        plan.items.find((i) => i.integrationStatus === "blocked")?.id
+          ?? plan.items.find((i) => i.integrationStatus === "review")?.id
+          ?? plan.items[0]?.id
+          ?? null,
       );
-      setActiveConflictId(attention[0]?.id ?? null);
     } catch (e) {
       setToast(<span>{(e as AppErrorPayload).message}</span>);
     } finally {
@@ -768,93 +768,37 @@ export default function App() {
               <p>审查集成计划，确认后执行迁移</p>
             </div>
           </div>
-          <div className={`main-content${needsAttention ? "" : " main-content--scroll"}`}>
+          <div className="main-content">
             {planLoading ? (
               <div className="empty-state"><p>生成集成计划中…</p></div>
-            ) : needsAttention ? (
-              <>
-                <div className="conflict-banner">
-                  <div className="conflict-banner-icon">
-                    <IconWarn />
-                  </div>
-                  <div>
-                    <h3>集成审查</h3>
-                    <p>
-                      {integrationPlan?.autoOkCount ?? 0} 个文件可自动应用。
-                      需确认项接受写入策略后可继续；需人工处理项请修改文件后标记已解决。
-                    </p>
-                  </div>
-                </div>
-                <ConflictWorkspace
-                  items={attentionItems}
-                  migrationMode={migrationMode}
-                  onMigrationModeChange={handleMigrationModeChange}
-                  autoOkCount={integrationPlan?.autoOkCount ?? 0}
-                  activeId={activeConflictId}
-                  acceptedReviewIds={acceptedReviewIds}
-                  resolvedBlockedIds={resolvedBlockedIds}
-                  target={target}
-                  editors={editors}
-                  selectedEditorId={selectedEditorId}
-                  onSelectEditor={async (id) => {
-                    await setDefaultEditor(id);
-                    setSelectedEditorId(id);
-                  }}
-                  onBrowseEditor={() => setModal({ mode: "editor" })}
-                  onSelect={setActiveConflictId}
-                  onOpenWithEditor={openInEditor}
-                  onAcceptReview={acceptReview}
-                  onMarkResolved={markBlockedResolved}
-                  onAcceptAllReview={acceptAllReview}
-                />
-              </>
+            ) : integrationPlan ? (
+              <ConflictWorkspace
+                items={integrationPlan.items}
+                migrationMode={migrationMode}
+                onMigrationModeChange={handleMigrationModeChange}
+                autoOkCount={integrationPlan.autoOkCount}
+                reviewCount={integrationPlan.reviewCount}
+                blockedCount={integrationPlan.blockedCount}
+                activeId={activeConflictId}
+                acceptedReviewIds={acceptedReviewIds}
+                resolvedBlockedIds={resolvedBlockedIds}
+                target={target}
+                editors={editors}
+                selectedEditorId={selectedEditorId}
+                onSelectEditor={async (id) => {
+                  await setDefaultEditor(id);
+                  setSelectedEditorId(id);
+                }}
+                onBrowseEditor={() => setModal({ mode: "editor" })}
+                onSelect={setActiveConflictId}
+                onOpenWithEditor={openInEditor}
+                onAcceptReview={acceptReview}
+                onMarkResolved={markBlockedResolved}
+                onAcceptAllReview={acceptAllReview}
+                canExecute={canExecuteMigration}
+              />
             ) : (
-              <div className="card" style={{ padding: 24 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>源仓库</span>
-                    <span>
-                      {source?.name} {source && <VcsBadge type={source.type} />}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>目标仓库</span>
-                    <span>
-                      {target?.name} {target && <VcsBadge type={target.type} />}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>提交数量</span>
-                    <span>{selectedCommits.size} 条</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>文件变更</span>
-                    <span>
-                      {previewMeta?.files.length ?? 0} 个文件（+{previewMeta?.adds ?? 0} / ~{previewMeta?.mods ?? 0} / −
-                      {previewMeta?.dels ?? 0}）
-                    </span>
-                  </div>
-                  {integrationPlan && (
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "var(--text-secondary)" }}>可自动应用</span>
-                      <span>{integrationPlan.autoOkCount} 个文件</span>
-                    </div>
-                  )}
-                  <div
-                    style={{
-                      borderTop: "1px solid var(--border)",
-                      marginTop: 8,
-                      paddingTop: 16,
-                      color: "var(--add)",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <IconCheck /> 集成计划已就绪，可以执行迁移
-                  </div>
-                </div>
-              </div>
+              <div className="empty-state"><p>无法生成集成计划</p></div>
             )}
           </div>
         </div>

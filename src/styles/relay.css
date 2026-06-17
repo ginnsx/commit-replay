@@ -766,22 +766,89 @@
     .integration-summary {
       padding: 12px 16px;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 10px;
     }
     .integration-summary-stats {
       display: flex;
       gap: 16px;
       font-size: 13px;
-      color: var(--text-secondary);
+      flex-wrap: wrap;
     }
+    .integration-stat--auto_ok { color: var(--add); }
+    .integration-stat--review { color: var(--warn); }
+    .integration-stat--blocked { color: var(--del); }
     .integration-summary-mode {
       display: flex;
       align-items: center;
       gap: 10px;
       font-size: 13px;
+      flex-wrap: wrap;
+    }
+    .integration-ready {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .integration-ready.ready {
+      color: var(--add);
+    }
+    .integration-file-list {
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow: auto;
+    }
+    .integration-section {
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .integration-section-header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: none;
+      background: var(--bg-raised);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+    }
+    .integration-section-header:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .integration-section-chevron {
+      display: inline-flex;
+      transition: transform 0.15s;
+    }
+    .integration-section-chevron.open {
+      transform: rotate(180deg);
+    }
+    .integration-section-count {
+      margin-left: auto;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+    .integration-section-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px 0 8px;
+    }
+    .integration-section--blocked .integration-section-header {
+      color: var(--del);
+    }
+    .integration-section--review .integration-section-header {
+      color: var(--warn);
+    }
+    .integration-section--auto_ok .integration-section-header {
+      color: var(--add);
     }
     .integration-summary-mode label {
       color: var(--text-muted);
