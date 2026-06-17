@@ -48,12 +48,14 @@ pub fn enrich_files(kind: TargetWcKind, wc_root: &str, files: &mut [FileChange])
             .ok_or_else(|| AppError::Mapping("file missing target_path after mapping".into()))?;
 
         let wc_path = resolve_wc_path(wc_root, &target);
-        fc.before = match fc.kind {
-            FileChangeKind::Add => None,
-            _ => read_wc_file(&wc_path),
-        };
+        fc.before = read_wc_file(&wc_path);
 
-        fc.after = derive_after(fc.before.as_deref(), fc.patch.as_deref(), &fc.kind)?;
+        fc.after = derive_after(
+            fc.before.as_deref(),
+            fc.patch.as_deref(),
+            &fc.kind,
+            fc.source_after.as_deref(),
+        )?;
 
         fc.conflict_risk = Some(match fc.kind {
             FileChangeKind::Binary => ConflictRisk::Low,

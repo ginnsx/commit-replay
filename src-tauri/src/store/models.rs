@@ -154,6 +154,7 @@ pub struct IntegrationItemView {
     pub overlap_lines: Option<[u32; 2]>,
     pub before: Vec<String>,
     pub after: Vec<String>,
+    pub diff: Vec<DiffLine>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

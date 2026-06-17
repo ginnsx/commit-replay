@@ -962,7 +962,6 @@
       padding: 1px 12px 1px 0;
     }
     .conflict-code.empty { background: rgba(0,0,0,0.15); }
-    .conflict-row.chg .conflict-code { color: var(--warn); }
     .conflict-row.add .conflict-code { color: var(--add); }
     .conflict-row.del .conflict-code { color: var(--del); }
     .conflict-compare-toolbar {

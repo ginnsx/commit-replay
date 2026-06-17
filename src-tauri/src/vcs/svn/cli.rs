@@ -106,6 +106,14 @@ pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) ->
     )
 }
 
+pub fn svn_cat_file(creds: &SvnCredentials, revision: u64, file_path: &str) -> Result<String> {
+    run_svn(
+        file_path,
+        creds,
+        &["cat", "-r", &revision.to_string()],
+    )
+}
+
 pub fn svn_info_xml(wc_path: &str) -> Result<String> {
     run_svn(wc_path, &SvnCredentials::default(), &["info", "--xml"])
 }

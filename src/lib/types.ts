@@ -91,6 +91,7 @@ export interface IntegrationItemView {
   overlapLines?: [number, number];
   before: string[];
   after: string[];
+  diff: DiffLine[];
 }
 
 export interface IntegrationPlanResult {

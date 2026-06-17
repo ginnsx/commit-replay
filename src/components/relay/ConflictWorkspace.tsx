@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Editor, IntegrationItemView, MigrationMode, Repo } from "../../lib/types";
+import type { DiffLine, Editor, IntegrationItemView, MigrationMode, Repo } from "../../lib/types";
 import { splitFilePath, targetFilePath } from "../../lib/constants";
 import { StatusBadge } from "./Badges";
 import { IconCheck, IconChevronDown } from "./icons";
@@ -17,17 +17,15 @@ const STRATEGY_LABELS: Record<IntegrationItemView["strategy"], string> = {
   manual_merge: "人工合并",
 };
 
-function alignRows(before: string[], after: string[]) {
-  const max = Math.max(before.length, after.length);
-  const rows: { left: string | null; right: string | null; kind: string; lineNo: number }[] = [];
-  for (let i = 0; i < max; i++) {
-    const left = before[i] ?? null;
-    const right = after[i] ?? null;
-    const kind =
-      left === right ? "same" : left === null ? "add" : right === null ? "del" : "chg";
-    rows.push({ left, right, kind, lineNo: i + 1 });
-  }
-  return rows;
+function diffCompareRows(diff: DiffLine[]) {
+  return diff.map((line, index) => ({
+    key: index,
+    leftLn: line.old ?? "",
+    rightLn: line.new ?? "",
+    left: line.type === "ctx" || line.type === "del" ? line.text : null,
+    right: line.type === "ctx" || line.type === "add" ? line.text : null,
+    kind: line.type === "ctx" ? "same" : line.type,
+  }));
 }
 
 function EditorOpenMenu({
@@ -120,7 +118,7 @@ function IntegrationCompareView({
   accepted: boolean;
   resolved: boolean;
 }) {
-  const rows = alignRows(item.before, item.after);
+  const rows = diffCompareRows(item.diff ?? []);
   const fullPath = target ? targetFilePath(target.path, item.path) : item.path;
   const leftPaneRef = useRef<HTMLDivElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
@@ -185,8 +183,8 @@ function IntegrationCompareView({
         >
           <div className="conflict-compare-lines">
             {rows.map((row) => (
-              <div key={row.lineNo} className={`conflict-row ${row.kind}`}>
-                <span className="conflict-ln">{row.lineNo}</span>
+              <div key={row.key} className={`conflict-row ${row.kind}`}>
+                <span className="conflict-ln">{row.leftLn}</span>
                 <span className={`conflict-code${row.left === null ? " empty" : ""}`}>
                   {row.left ?? ""}
                 </span>
@@ -201,8 +199,8 @@ function IntegrationCompareView({
         >
           <div className="conflict-compare-lines">
             {rows.map((row) => (
-              <div key={row.lineNo} className={`conflict-row ${row.kind}`}>
-                <span className="conflict-ln">{row.lineNo}</span>
+              <div key={row.key} className={`conflict-row ${row.kind}`}>
+                <span className="conflict-ln">{row.rightLn}</span>
                 <span className={`conflict-code${row.right === null ? " empty" : ""}`}>
                   {row.right ?? ""}
                 </span>
