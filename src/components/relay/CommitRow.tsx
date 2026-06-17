@@ -1,17 +1,18 @@
+import { memo } from "react";
 import type { CommitListItem, CommitSnapshot } from "../../lib/types";
 import { IconCheck } from "./icons";
 
-export function CommitRow({
+export const CommitRow = memo(function CommitRow({
   commit,
   selected,
   onToggle,
 }: {
   commit: CommitListItem;
   selected: boolean;
-  onToggle: () => void;
+  onToggle: (id: string) => void;
 }) {
   return (
-    <div className={`commit-row${selected ? " selected" : ""}`} onClick={onToggle}>
+    <div className={`commit-row${selected ? " selected" : ""}`} onClick={() => onToggle(commit.id)}>
       <div className="commit-check">{selected && <IconCheck />}</div>
       <span className="commit-hash">{commit.hash}</span>
       <span className="commit-msg">{commit.msg}</span>
@@ -22,7 +23,7 @@ export function CommitRow({
       </div>
     </div>
   );
-}
+});
 
 export function CommitRowReadonly({ commit }: { commit: CommitListItem | CommitSnapshot }) {
   return (

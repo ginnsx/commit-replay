@@ -10,6 +10,7 @@ use super::svn::{
     SvnCredentials,
 };
 
+#[derive(Clone)]
 pub struct SvnReader {
     pub wc_path: String,
     pub username: Option<String>,
@@ -57,7 +58,7 @@ pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Res
     let revision = parse_svn_revision(&meta.source_ref)?;
     let diff = svn_diff_revision(&reader.wc_path, &reader.creds(), revision)?;
     let mut files = parse_unified_diff(&diff, Some(&reader.wc_path))?;
-    attach_source_after(reader, revision, &mut files);
+    tag_source_ref(&mut files, &meta.source_ref);
     Ok(ChangeSet {
         meta: ReplayUnitMeta {
             changed_paths_count: files.len(),
@@ -67,19 +68,29 @@ pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Res
     })
 }
 
-fn attach_source_after(reader: &SvnReader, revision: u64, files: &mut [crate::model::FileChange]) {
+pub fn tag_source_ref(files: &mut [crate::model::FileChange], source_ref: &str) {
+    for fc in files {
+        fc.source_ref = Some(source_ref.to_string());
+    }
+}
+
+pub fn attach_source_after_file(
+    reader: &SvnReader,
+    revision: u64,
+    fc: &mut crate::model::FileChange,
+) {
     use crate::model::FileChangeKind;
     use std::path::Path;
 
-    for fc in files.iter_mut() {
-        if matches!(fc.kind, FileChangeKind::Delete | FileChangeKind::Binary) {
-            continue;
-        }
-        let rel = fc.path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR);
-        let file_path = Path::new(&reader.wc_path).join(rel);
-        let Ok(content) = svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy()) else {
-            continue;
-        };
+    if fc.source_after.is_some() {
+        return;
+    }
+    if matches!(fc.kind, FileChangeKind::Delete | FileChangeKind::Binary) {
+        return;
+    }
+    let rel = fc.path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR);
+    let file_path = Path::new(&reader.wc_path).join(rel);
+    if let Ok(content) = svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy()) {
         fc.source_after = Some(content);
     }
 }

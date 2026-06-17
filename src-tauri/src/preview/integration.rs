@@ -323,6 +323,7 @@ mod tests {
             before: Some(before.into()),
             after: Some(after.into()),
             source_after: None,
+            source_ref: None,
             patch: Some(patch.into()),
             conflict_risk: None,
         }
@@ -346,6 +347,7 @@ mod tests {
             before: Some("exists\n".into()),
             after: Some("new\n".into()),
             source_after: None,
+            source_ref: None,
             patch: Some("@@ -0,0 +1,1 @@\n+new\n".into()),
             conflict_risk: None,
         };
@@ -414,6 +416,7 @@ mod tests {
             before: Some("line1\nline2\n".into()),
             after: Some("line1\nline2\n".into()),
             source_after: None,
+            source_ref: None,
             patch: Some("@@ -0,0 +1,2 @@\n+line1\n+line2\n".into()),
             conflict_risk: None,
         };

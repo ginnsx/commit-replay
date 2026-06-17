@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { CommitListItem } from "../../lib/types";
 import { CommitRow } from "./CommitRow";
 import { IconClose, IconSearch } from "./icons";
 
+const ROW_GAP = 4;
+const ROW_ESTIMATE = 68;
+
 export function CommitPicker({
   commits,
-  pageSize,
   selectedIds,
   onToggle,
   onSelectMany,
@@ -14,7 +17,6 @@ export function CommitPicker({
   fetchingRemote,
 }: {
   commits: CommitListItem[];
-  pageSize: number;
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onSelectMany: (ids: string[], select: boolean) => void;
@@ -23,67 +25,64 @@ export function CommitPicker({
   fetchingRemote?: boolean;
 }) {
   const [search, setSearch] = useState("");
-  const [visibleCount, setVisibleCount] = useState(pageSize);
   const [loadingMore, setLoadingMore] = useState(false);
-  const pendingExpandRef = useRef(false);
-  const prevCommitCountRef = useRef(commits.length);
+  const listRef = useRef<HTMLDivElement>(null);
   const q = search.trim().toLowerCase();
-  const filtered = commits.filter((c) => {
-    if (!q) return true;
-    return (
-      c.hash.toLowerCase().includes(q) ||
-      c.msg.toLowerCase().includes(q) ||
-      c.author.toLowerCase().includes(q) ||
-      c.date.includes(q)
+
+  const filtered = useMemo(() => {
+    if (!q) return commits;
+    return commits.filter(
+      (c) =>
+        c.hash.toLowerCase().includes(q) ||
+        c.msg.toLowerCase().includes(q) ||
+        c.author.toLowerCase().includes(q) ||
+        c.date.includes(q),
     );
+  }, [commits, q]);
+
+  const allFilteredSelected = useMemo(() => {
+    if (filtered.length === 0 || selectedIds.size < filtered.length) return false;
+    return filtered.every((c) => selectedIds.has(c.id));
+  }, [filtered, selectedIds]);
+
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => ROW_ESTIMATE,
+    gap: ROW_GAP,
+    overscan: 8,
   });
-  const visible = filtered.slice(0, visibleCount);
-  const hasMoreLocal = visibleCount < filtered.length;
-  const allFilteredSelected = filtered.length > 0 && filtered.every((c) => selectedIds.has(c.id));
-  const showLoadMore = hasMoreLocal || !!hasRemoteMore;
+
   const loading = loadingMore || !!fetchingRemote;
 
-  useEffect(() => {
-    setVisibleCount(pageSize);
-  }, [q, pageSize]);
+  const loadMore = useCallback(async () => {
+    if (loading || !hasRemoteMore || !onFetchRemote) return;
+    setLoadingMore(true);
+    try {
+      await onFetchRemote();
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasRemoteMore, loading, onFetchRemote]);
 
   useEffect(() => {
-    if (pendingExpandRef.current && commits.length > prevCommitCountRef.current) {
-      pendingExpandRef.current = false;
-      setVisibleCount((n) => Math.min(n + pageSize, filtered.length));
-    }
-    prevCommitCountRef.current = commits.length;
-  }, [commits.length, filtered.length, pageSize]);
+    const el = listRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      if (loading || !hasRemoteMore) return;
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - ROW_ESTIMATE * 4) {
+        void loadMore();
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [hasRemoteMore, loadMore, loading]);
 
   const toggleSelectFiltered = () => {
-    if (allFilteredSelected) {
-      onSelectMany(
-        filtered.map((c) => c.id),
-        false,
-      );
-    } else {
-      onSelectMany(
-        filtered.map((c) => c.id),
-        true,
-      );
-    }
-  };
-
-  const loadMore = async () => {
-    if (loading) return;
-    if (hasMoreLocal) {
-      setVisibleCount((n) => Math.min(n + pageSize, filtered.length));
-      return;
-    }
-    if (hasRemoteMore && onFetchRemote) {
-      setLoadingMore(true);
-      pendingExpandRef.current = true;
-      try {
-        await onFetchRemote();
-      } finally {
-        setLoadingMore(false);
-      }
-    }
+    onSelectMany(
+      filtered.map((c) => c.id),
+      !allFilteredSelected,
+    );
   };
 
   return (
@@ -134,31 +133,50 @@ export function CommitPicker({
         </div>
       ) : (
         <>
-          <div className="commit-list">
-            {visible.map((c) => (
-              <CommitRow
-                key={c.id}
-                commit={c}
-                selected={selectedIds.has(c.id)}
-                onToggle={() => onToggle(c.id)}
-              />
-            ))}
+          <div ref={listRef} className="commit-list-scroll">
+            <div
+              className="commit-list"
+              style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+            >
+              {virtualizer.getVirtualItems().map((item) => {
+                const commit = filtered[item.index];
+                return (
+                  <div
+                    key={commit.id}
+                    data-index={item.index}
+                    ref={virtualizer.measureElement}
+                    className="commit-list-item"
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${item.start}px)`,
+                    }}
+                  >
+                    <CommitRow
+                      commit={commit}
+                      selected={selectedIds.has(commit.id)}
+                      onToggle={onToggle}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <div className="commit-picker-footer">
             <span className="commit-picker-count">
-              已显示 {visible.length} / {filtered.length} 条
-              {q ? `（共 ${commits.length} 条）` : ""}
+              共 {filtered.length} 条{q ? `（全部 ${commits.length} 条）` : ""}
+              {selectedIds.size > 0 ? ` · 已选 ${selectedIds.size} 条` : ""}
             </span>
-            {showLoadMore && (
+            {hasRemoteMore && (
               <button
                 type="button"
                 className={`btn btn-ghost commit-load-more${loading ? " loading" : ""}`}
                 disabled={loading}
-                onClick={loadMore}
+                onClick={() => void loadMore()}
               >
-                {loading
-                  ? "加载中…"
-                  : `加载更多（${Math.min(pageSize, hasMoreLocal ? filtered.length - visible.length : pageSize)} 条）`}
+                {loading ? "加载中…" : "加载更早提交"}
               </button>
             )}
           </div>

@@ -9,6 +9,7 @@ use super::svn_writer::SvnWriter;
 use super::VcsReader;
 use super::VcsWriter;
 
+#[derive(Clone)]
 pub enum SourceReader {
     Svn(SvnReader),
     Git(GitReader),
@@ -49,6 +50,10 @@ impl SourceReader {
             SourceReader::Svn(r) => r.load_changeset(source_ref),
             SourceReader::Git(r) => r.load_changeset(source_ref),
         }
+    }
+
+    pub fn load_changeset_meta(&self, source_ref: &str) -> Result<ChangeSet> {
+        self.load_changeset(source_ref)
     }
 }
 
