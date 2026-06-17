@@ -1,6 +1,6 @@
 # copy-diff
 
-跨版本控制系统（VCS）的**提交回放**桌面工具。从源仓库（SVN / Git）挑选若干次提交，在目标仓库（Git / SVN）中复现文件变更并生成对应提交，支持全量 diff 预览、失败回滚与审计记录。
+跨版本控制系统（VCS）的**提交迁移**桌面工具。从源仓库（SVN / Git）挑选若干次提交，在目标仓库（Git / SVN）中复现文件变更并生成对应提交，支持全量 diff 预览、集成计划审查、冲突处理与迁移记录。
 
 技术栈：**Tauri 2**（Rust 后端）+ **React + TypeScript**（前端）。
 
@@ -28,54 +28,65 @@
 
 | 能力 | 说明 |
 |------|------|
-| 提交列表 | 拉取源仓库最近提交，人工勾选要回放的条目 |
-| 全量预览 | 在应用前查看所有文件的 before/after diff |
-| 路径映射 | 源路径与目标路径不一致时，通过配置映射 |
-| 顺序回放 | 每个源提交对应目标侧一次 commit（可配置策略） |
-| 失败处理 | apply 失败即回滚工作区，进入人工解决后再提交 |
-| 审计 | 记录每条 source_ref 与 target_ref 的对应关系 |
+| 仓库管理 | 保存源/目标仓库配置（路径、分支、SVN 凭据），支持 Git / SVN 探测 |
+| 提交列表 | 分页拉取源仓库最近提交，人工勾选要迁移的条目 |
+| 路径映射 | 源路径与目标路径不一致时配置映射，按仓库对持久化 |
+| 变更预览 | 按文件聚合 diff，懒加载单文件详情，虚拟滚动渲染 |
+| 集成计划 | 分析目标工作区，将每个文件标记为自动通过 / 待确认 / 阻塞 |
+| 迁移执行 | 按集成策略 apply + commit，失败自动回滚工作区 |
+| 冲突处理 | 用外部编辑器打开目标文件，人工处理后标记已解决 |
+| 迁移记录 | SQLite 持久化每次迁移的源/目标、提交、文件与状态 |
 
-计划支持的仓库组合（通过 Reader / Writer 适配器扩展）：
+支持的仓库组合（通过 `SourceReader` / `MigrationWriter` 适配器）：
 
-| 源 | 目标 | 优先级 |
-|----|------|--------|
-| SVN | Git | 首期 |
-| Git | Git | 后续 |
-| SVN | SVN | 后续 |
-| Git | SVN | 后续 |
+| 源 | 目标 | 状态 |
+|----|------|------|
+| SVN | Git | 已支持 |
+| Git | Git | 已支持 |
+| SVN | SVN | 已支持 |
+| Git | SVN | 已支持 |
 
 ---
 
 ## 典型工作流
 
+向导式五步流程：
+
 ```
-配置连接 → 拉取提交列表 → 勾选 revision → 预览 diff
-    → 确认执行 →（失败）→ 冲突解决 → 校验通过 → 提交
-    → 对账表记录
+源仓库 → 选择提交 → 目标仓库（含路径映射）→ 变更预览 → 确认迁移
 ```
 
-核心原则：**预览与执行使用同一套映射与 ChangeSet 逻辑**；**校验未通过不得 commit**，避免目标仓库出现不可用代码。
+迁移步骤内部：
+
+```
+生成集成计划 → 审查 auto_ok / review / blocked 项
+    →（阻塞项）用编辑器打开文件并标记已解决
+    →（待确认项）人工确认
+    → 执行迁移 → 写入迁移记录
+```
+
+核心原则：**预览与执行使用同一套映射与 ChangeSet 逻辑**；**集成计划中 review / blocked 项未处理完毕不得执行迁移**。
 
 ---
 
 ## 当前实现状态
 
-> 项目处于早期脚手架阶段，以下为截至 step 1 的状态。
-
 | 模块 | 状态 |
 |------|------|
 | Tauri + React 脚手架、依赖、lint/test | 已完成 |
-| `model` 数据模型（Rust + TS 类型镜像） | 已完成 |
+| `model` 核心数据模型（ChangeSet、FileChange…） | 已完成 |
+| `store` SQLite 持久化（仓库、编辑器、迁移记录、路径映射） | 已完成 |
 | `mapper` 路径映射 + 单元测试 | 已完成 |
-| `SvnReader`（`list_recent` / `load_changeset`） | 已完成 |
-| `list_commits` / `load_changeset` commands | 已完成 |
-| CommitList 页（连接表单 + 列表 + 多选） | 已完成 |
-| Preview（映射 + before/after + `git apply --check`） | 已完成 |
-| Preview 页（Monaco diff、文件树、汇总/按提交） | 已完成 |
-| `VcsWriter`、Execute、冲突工作台 等 | 未开始 |
-| SQLite 审计、Monaco diff UI | 未开始 |
-
-本地验证桥接是否正常：运行 `npm run tauri dev`，界面应显示 **Rust bridge: connected**（调用 `ping` command）。
+| `SvnReader` / `GitReader`（分页列表 + load_changeset） | 已完成 |
+| `GitWriter` / `SvnWriter`（prepare / apply / commit / rollback） | 已完成 |
+| `preview` 预览服务、集成计划、预览缓存 | 已完成 |
+| 向导 UI（源/提交/目标/预览/迁移五步） | 已完成 |
+| 设置页（仓库管理、编辑器、迁移历史） | 已完成 |
+| 自定义 DiffView（虚拟滚动行级 diff） | 已完成 |
+| `execute_migration` 迁移执行 + 记录写入 | 已完成 |
+| 实时进度事件（`unit-status` emit） | 未开始 |
+| `ReplayPolicy` 批量策略（fail_stop / skip_failed） | 未接入 UI |
+| 打包分发优化 | 待完善 |
 
 ---
 
@@ -87,8 +98,8 @@
 |------|----------|------|
 | [Node.js](https://nodejs.org/) | 18+ | 前端构建、npm scripts |
 | [Rust](https://rustup.rs/) | stable | Tauri 后端 |
-| [Git](https://git-scm.com/) | 任意较新版本 | 目标仓操作、开发 |
-| [SVN](https://subversion.apache.org/) | 1.8+ | 源仓操作（首期） |
+| [Git](https://git-scm.com/) | 任意较新版本 | Git 仓操作 |
+| [SVN](https://subversion.apache.org/) | 1.8+ | SVN 仓操作 |
 
 ### Windows 特别注意
 
@@ -148,6 +159,7 @@ npm run dev
 | `npm run dev` | 仅 Vite 前端 |
 | `npm test` | 前端单元测试（Vitest，单次） |
 | `npm run test:watch` | 前端测试监听模式 |
+| `npm run test:integration` | SVN 集成测试（需本地 SVN 环境，`--ignored`） |
 | `npm run lint` | ESLint 检查 `src/` |
 | `npm run lint:fix` | ESLint 自动修复 |
 | `npm run format` | Prettier 格式化 `src/` |
@@ -171,46 +183,59 @@ cd src-tauri && cargo test && cargo clippy
 
 ```
 copy-diff/
-├── src/                          # React 前端
-│   ├── App.tsx                   # 根组件（当前：ping 桥接测试）
-│   ├── main.tsx                  # 入口
-│   ├── App.css                   # Tailwind 入口（@import "tailwindcss"）
+├── src/                              # React 前端
+│   ├── App.tsx                       # 根组件（五步向导 + 设置页）
+│   ├── main.tsx                      # 入口
+│   ├── styles/relay.css              # 应用样式
 │   ├── lib/
-│   │   ├── types.ts              # 与 Rust model 对齐的 TS 类型（须保持同步）
-│   │   ├── invoke.ts             # 封装所有 tauri::command 调用
+│   │   ├── types.ts                  # 与 Rust store/models 对齐的 TS 类型
+│   │   ├── invoke.ts                 # 封装所有 tauri::command 调用
+│   │   ├── constants.ts              # 向导步骤、默认映射等
 │   │   └── types.test.ts
-│   ├── pages/                    # 页面（待实现：Setup, CommitList, Preview…）
-│   ├── components/               # 可复用组件（待实现：DiffViewer, FileTree…）
-│   ├── store/                    # Zustand 状态（待实现）
-│   └── test/setup.ts             # Vitest 全局 setup
+│   ├── components/
+│   │   ├── relay/                    # 向导 UI 组件
+│   │   │   ├── StepRail.tsx          # 左侧步骤导航
+│   │   │   ├── CommitPicker.tsx      # 提交多选列表
+│   │   │   ├── FileTree.tsx          # 预览文件树
+│   │   │   ├── DiffView.tsx          # 虚拟滚动 diff 视图
+│   │   │   ├── ConflictWorkspace.tsx # 集成计划 / 冲突处理
+│   │   │   ├── PathMappingPanel.tsx  # 路径映射配置
+│   │   │   └── …
+│   │   └── settings/                 # 设置页（仓库、编辑器、迁移历史）
+│   └── test/setup.ts
 │
-├── src-tauri/                    # Rust / Tauri 后端
+├── src-tauri/                        # Rust / Tauri 后端
 │   ├── src/
-│   │   ├── main.rs               # 二进制入口，调用 lib::run()
-│   │   ├── lib.rs                # 注册 plugins 与 invoke_handler
-│   │   ├── model.rs              # 核心数据结构（ChangeSet, ReplayPlan…）
-│   │   ├── error.rs              # AppError + Tauri 可序列化错误
-│   │   ├── mapper.rs             # 路径映射
-│   │   ├── commands/             # #[tauri::command] 入口
-│   │   │   ├── reader.rs         # list_commits
-│   │   │   ├── preview.rs        # build_preview
-│   │   │   └── writer.rs         # apply_unit, commit_resolved, …
-│   │   └── vcs/                  # VCS 适配器
-│   │       ├── mod.rs            # VcsReader / VcsWriter trait
-│   │       ├── svn_reader.rs
-│   │       ├── git_reader.rs
-│   │       ├── git_writer.rs
-│   │       └── svn_writer.rs
-│   ├── capabilities/             # Tauri 2 权限配置
-│   ├── tauri.conf.json           # 窗口、构建、shell 白名单（git/svn）
-│   ├── Cargo.toml
-│   ├── rustfmt.toml
-│   └── .clippy.toml
+│   │   ├── main.rs                   # 二进制入口
+│   │   ├── lib.rs                    # 注册 plugins 与 invoke_handler
+│   │   ├── model.rs                  # VCS 无关核心模型（ChangeSet, FileChange…）
+│   │   ├── error.rs                  # AppError
+│   │   ├── mapper.rs                 # 路径映射
+│   │   ├── relay.rs                  # FileChange → FileChangeView 转换
+│   │   ├── diff/                     # 行级 diff 计算
+│   │   ├── preview/                  # 预览服务、集成计划、缓存
+│   │   ├── store/                    # SQLite 持久化
+│   │   │   ├── db.rs                 # 数据库操作
+│   │   │   ├── models.rs             # 前后端共享的视图模型
+│   │   │   └── crypto.rs             # SVN 密码加密
+│   │   ├── commands/
+│   │   │   ├── settings.rs           # relay_* 仓库/编辑器/迁移记录
+│   │   │   ├── reader.rs             # list_repo_commits, 路径映射
+│   │   │   ├── preview.rs            # build_preview_meta, get_file_diff, 集成计划
+│   │   │   ├── migrate.rs            # execute_migration
+│   │   │   └── writer.rs             # open_file_in_editor
+│   │   └── vcs/                      # VCS 适配器
+│   │       ├── factory.rs            # SourceReader / MigrationWriter 工厂
+│   │       ├── svn_reader.rs / git_reader.rs
+│   │       ├── git_writer.rs / svn_writer.rs
+│   │       └── svn/                  # SVN CLI 解析子模块
+│   ├── capabilities/
+│   ├── tauri.conf.json
+│   └── Cargo.toml
 │
-├── eslint.config.js              # ESLint flat config
-├── .prettierrc
-├── vite.config.ts                # Vite + Vitest + Tailwind
-├── rust-toolchain.toml           # 固定 Rust MSVC 工具链
+├── eslint.config.js
+├── vite.config.ts
+├── rust-toolchain.toml
 └── package.json
 ```
 
@@ -221,20 +246,27 @@ copy-diff/
 ```mermaid
 flowchart LR
     subgraph ui [React UI]
-        Pages[pages]
+        App[App.tsx 向导]
         Invoke[lib/invoke.ts]
     end
 
     subgraph tauri [Tauri Commands]
+        Settings[settings relay_*]
         Reader[reader]
         Preview[preview]
+        Migrate[migrate]
         Writer[writer]
     end
 
     subgraph core [Rust Core]
         Model[model]
         Mapper[mapper]
-        Policy[policy - planned]
+        PreviewSvc[preview]
+        Integration[integration]
+    end
+
+    subgraph store [SQLite]
+        DB[relay.db]
     end
 
     subgraph adapters [VCS Adapters]
@@ -244,37 +276,54 @@ flowchart LR
         SvnW[svn_writer]
     end
 
-    Pages --> Invoke
-    Invoke -->|invoke| Reader
+    App --> Invoke
+    Invoke --> Settings
+    Invoke --> Reader
     Invoke --> Preview
+    Invoke --> Migrate
     Invoke --> Writer
+    Settings --> DB
+    Migrate --> DB
     Reader --> adapters
-    Preview --> Model
-    Preview --> Mapper
-    Writer --> adapters
+    Reader --> DB
+    Preview --> PreviewSvc
+    Preview --> Integration
+    PreviewSvc --> Model
+    PreviewSvc --> Mapper
+    Migrate --> PreviewSvc
+    Migrate --> adapters
 ```
 
 ### 核心概念
 
 | 概念 | 位置 | 含义 |
 |------|------|------|
-| `ReplayUnitMeta` | `model.rs` | 列表里的一行提交（rev / sha、作者、说明） |
+| `ReplayUnitMeta` | `model.rs` | 列表里的一行提交（`svn:12345` / `git:abc1234`） |
 | `ChangeSet` | `model.rs` | 一次提交带来的全部 `FileChange` |
 | `FileChange` | `model.rs` | 单文件增删改及 before/after/patch |
-| `ReplayPlan` | `model.rs` | 有序 ChangeSet 列表 + 回放策略 |
-| `PreviewResult` | `model.rs` | 预览聚合结果 + 冲突风险统计 |
+| `FileChangeView` | `store/models.rs` | 前端展示用的文件变更（含 diff 行） |
+| `MigrationMode` | `store/models.rs` | 迁移模式（见下表） |
+| `IntegrationPlanResult` | `store/models.rs` | 集成计划：每个文件的审查状态与策略 |
 | `VcsReader` | `vcs/mod.rs` | 源侧：列表 + 加载 ChangeSet |
-| `VcsWriter` | `vcs/mod.rs` | 目标侧：prepare → apply → validate → commit / rollback |
+| `VcsWriter` | `vcs/mod.rs` | 目标侧：prepare → apply → commit / rollback |
 
 VCS 差异屏蔽在 **ChangeSet** 层：无论 SVN revision 还是 Git commit，进入核心逻辑后格式统一。
 
-### 回放策略（`ReplayPolicy`）
+### 迁移模式（`MigrationMode`）
 
-| 策略 | 行为 |
+| 模式 | 行为 |
 |------|------|
-| `fail_stop`（默认） | 任一 unit 失败则暂停整批 |
-| `skip_failed` | 跳过失败项，继续后续（审计须记录缺口） |
-| `manual_on_fail` | 失败后进入人工解决流程再继续 |
+| `incremental_first`（默认） | 优先增量合并，目标已有内容时尽量保留 |
+| `commit_result` | 以最终提交结果为准 |
+| `strict_replay` | 严格按源提交顺序逐条回放 |
+
+### 集成状态（`IntegrationStatus`）
+
+| 状态 | 含义 |
+|------|------|
+| `auto_ok` | 可自动应用，无需人工干预 |
+| `review` | 需人工确认后方可执行 |
+| `blocked` | 目标工作区存在冲突，须用编辑器处理后标记已解决 |
 
 ---
 
@@ -285,24 +334,26 @@ VCS 差异屏蔽在 **ChangeSet** 层：无论 SVN revision 还是 Git commit，
 1. 在 `src-tauri/src/commands/` 实现 `#[tauri::command]` 函数  
 2. 在 `src-tauri/src/lib.rs` 的 `generate_handler![...]` 中注册  
 3. 在 `src/lib/invoke.ts` 增加对应封装函数  
-4. 若涉及新数据结构，同时更新 `model.rs` 与 `src/lib/types.ts`  
+4. 若涉及新数据结构，同时更新 `store/models.rs`（或 `model.rs`）与 `src/lib/types.ts`  
 
 ### 2. 类型同步
 
-Rust 侧用 `serde` 序列化，返回值字段名为 **snake_case**（如 `source_ref`）。  
-TypeScript 侧 [`src/lib/types.ts`](src/lib/types.ts) 须与 [`src-tauri/src/model.rs`](src-tauri/src/model.rs) 保持一致。  
+Rust 侧用 `serde` 序列化。  
+- VCS 核心模型：[`src-tauri/src/model.rs`](src-tauri/src/model.rs)  
+- 前后端共享视图模型：[`src-tauri/src/store/models.rs`](src-tauri/src/store/models.rs)  
+- TypeScript 镜像：[`src/lib/types.ts`](src/lib/types.ts)  
 
-**`invoke` 传参**须用 **camelCase**（Tauri 2 约定），例如 `sourceVcs`，不要用 `source_vcs`。见 [`src/lib/invoke.ts`](src/lib/invoke.ts)。  
+**`invoke` 传参**须用 **camelCase**（Tauri 2 约定），例如 `sourceId`，不要用 `source_id`。见 [`src/lib/invoke.ts`](src/lib/invoke.ts)。  
 
 修改 model 后请同时改两处，并补充/更新测试。
 
 ### 3. 错误处理
 
-Rust command 返回 `Result<T, AppError>`；`AppError` 已实现 `Serialize`，前端 `invoke` 失败时会收到字符串错误信息。
+Rust command 返回 `Result<T, AppError>`；`AppError` 已实现 `Serialize`，前端 `invoke` 失败时会收到结构化错误（`code` / `message` / `retryable`）。
 
 ### 4. 实时进度（计划中）
 
-长时间任务（批量 apply）将通过 `app.emit("unit-status", payload)` 推送 [`UnitStatusEvent`](src/lib/types.ts)，前端用 `@tauri-apps/api/event` 的 `listen` 订阅，避免轮询。
+长时间任务（批量 apply）将通过 `app.emit("unit-status", payload)` 推送事件，前端用 `@tauri-apps/api/event` 的 `listen` 订阅，避免轮询。
 
 ---
 
@@ -328,18 +379,18 @@ cargo test mapper   # 跑单个模块
 
 ### 调试技巧
 
-- **Rust 日志**：在 command 内使用 `log` crate（需在 `Cargo.toml` 启用 `tauri` 的 `devtools` 等，按需配置）  
-- **前端**：浏览器 DevTools（Tauri 窗口内 F12 或 `tauri dev` 配置的 devtools）  
-- **CLI 白名单**：`git` / `svn` 在 [`tauri.conf.json`](src-tauri/tauri.conf.json) 的 `plugins.shell.scope` 中声明  
+- **Rust 日志**：在 command 内使用 `log` crate  
+- **前端**：Tauri 窗口内 F12 或 `tauri dev` 配置的 devtools  
+- **CLI 白名单**：`git` / `svn` 在 [`tauri.conf.json`](src-tauri/tauri.conf.json) 的 shell scope 中声明  
+- **数据库位置**：`%APPDATA%/com.copy-diff.app/relay.db`（Windows）
 
 ### 测试放置约定
 
 | 语言 | 位置 | 运行方式 |
 |------|------|----------|
-| TypeScript | `src/**/*.test.ts` 或同目录 `*.test.ts` | `npm test` |
-| Rust | 各模块 `#[cfg(test)] mod tests` | `cargo test` |
-
-新增 `mapper`、纯解析逻辑等优先写 Rust 单元测试；UI 交互用 Vitest + Testing Library（待补充）。
+| TypeScript | `src/**/*.test.ts` | `npm test` |
+| Rust 单元测试 | 各模块 `#[cfg(test)]` | `cargo test` |
+| Rust 集成测试 | `src-tauri/tests/` | `cargo test --test svn_integration -- --ignored` |
 
 ---
 
@@ -356,16 +407,20 @@ TypeScript 开启 `strict` 模式；Rust 侧对 `unwrap` / `expect` 在 clippy �
 
 ## 路线图
 
-按实现顺序：
+已完成：
 
-1. **SVN Reader** — `svn log` / `svn diff` 解析，CommitList 页  
-2. **Preview** — 映射 + before/after + `git apply --check`，Preview 页 + Monaco diff  
-3. **Git Writer** — prepare / apply / commit / rollback，Execute 页  
-4. **冲突工作台** — 失败回滚、IDE 打开、校验闸门、Resolve 页  
-5. **审计** — SQLite `replay_log`，Audit 页  
-6. **配置与打包** — `config.yaml` 持久化、`tauri build`  
+1. **Reader** — SVN / Git 提交列表与 ChangeSet 加载  
+2. **Preview** — 映射 + 目标工作区 enrich + 集成计划  
+3. **Writer** — Git / SVN prepare / apply / commit / rollback  
+4. **向导 UI** — 五步流程 + 冲突工作台 + 设置页  
+5. **审计** — SQLite 迁移记录  
 
-扩展：Git Reader、SVN Writer、其余仓库组合。
+待完善：
+
+- 实时进度事件推送  
+- `ReplayPolicy` 批量失败策略接入 UI  
+- 打包分发与自动更新  
+- 更完善的集成测试覆盖  
 
 ---
 
@@ -387,9 +442,9 @@ Vite 固定使用 **1420** 端口（见 `vite.config.ts`）。关闭占用进程
 
 ### 前端 `invoke` 报错 `command not found`
 
-确认已在 `lib.rs` 的 `generate_handler!` 中注册，且 `invoke` 函数名与 Rust 侧 `snake_case` 一致（如 `list_commits`）。
+确认已在 `lib.rs` 的 `generate_handler!` 中注册，且 `invoke` 函数名与 Rust 侧 `snake_case` 一致（如 `list_repo_commits`）。
 
-### 仅 `npm run dev` 时 bridge 显示 error
+### 仅 `npm run dev` 时功能不可用
 
 预期行为：没有 Tauri 运行时，`invoke` 不可用。请使用 `npm run tauri dev`。
 
