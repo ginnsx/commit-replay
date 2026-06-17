@@ -72,16 +72,23 @@ fn svn_reader_from_repo(
 }
 
 #[tauri::command]
-pub fn list_repo_commits(
-    state: State<DbState>,
+pub async fn list_repo_commits(
+    state: State<'_, DbState>,
     repo_id: String,
     limit: usize,
-    offset: usize,
+    before_revision: Option<u64>,
 ) -> Result<Vec<CommitListItem>, AppError> {
     let (reader, id) = svn_reader_from_repo(&state, &repo_id)?;
-    let limit = limit.clamp(1, 200);
-    let metas = reader.list_recent_paged(limit, offset)?;
-    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let limit = limit.clamp(1, 500);
+
+    let metas = tokio::task::spawn_blocking(move || reader.list_recent_paged(limit, before_revision))
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("list commits task: {e}")))??;
+
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     let _ = touch_repo(&conn, &id);
     Ok(metas.iter().map(meta_to_item).collect())
 }

@@ -115,12 +115,12 @@ export async function probeSvnWc(path: string): Promise<SvnWcInfo> {
 export async function listRepoCommits(
   repoId: string,
   limit = 50,
-  offset = 0,
+  beforeRevision: number | null = null,
 ): Promise<CommitListItem[]> {
   const rows = await invoke<Array<Record<string, unknown>>>("list_repo_commits", {
     repoId,
     limit,
-    offset,
+    beforeRevision,
   });
   return rows.map((r) => ({
     id: String(r.id),
