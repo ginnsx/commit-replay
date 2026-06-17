@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::{
     diff::line_diff::find_overlap_lines,
     model::{FileChange, FileChangeKind},
-    preview::git_wc::check_apply,
     preview::patch_apply::reconstruct_old_from_patch,
+    preview::target_wc::{check_apply, TargetWcKind},
     relay::file_kind_to_status,
     store::models::{
         IntegrationItemView, IntegrationPlanResult, IntegrationStatus, IntegrationStrategy,
@@ -27,8 +27,11 @@ fn to_lines(text: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn patch_applies_cleanly(wc_root: &str, fc: &FileChange) -> bool {
-    matches!(check_apply(wc_root, fc), crate::model::ConflictRisk::Low)
+fn patch_applies_cleanly(target_kind: TargetWcKind, wc_root: &str, fc: &FileChange) -> bool {
+    matches!(
+        check_apply(target_kind, wc_root, fc),
+        crate::model::ConflictRisk::Low
+    )
 }
 
 fn line_match_ratio(a: &str, b: &str) -> f32 {
@@ -78,6 +81,7 @@ fn has_meaningful_overlap(
 pub fn build_integration_plan(
     files: &[FileChange],
     target_wc_path: &str,
+    target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> IntegrationPlanResult {
     let mut items = Vec::new();
@@ -90,7 +94,8 @@ pub fn build_integration_plan(
             .target_path
             .clone()
             .unwrap_or_else(|| fc.path.clone());
-        let (integration_status, strategy, reason) = classify_file(fc, target_wc_path, mode);
+        let (integration_status, strategy, reason) =
+            classify_file(fc, target_wc_path, target_kind, mode);
         match integration_status {
             IntegrationStatus::AutoOk => auto_ok_count += 1,
             IntegrationStatus::Review => review_count += 1,
@@ -131,6 +136,7 @@ pub fn strategy_map(plan: &IntegrationPlanResult) -> HashMap<String, Integration
 fn classify_file(
     fc: &FileChange,
     target_wc_path: &str,
+    target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> (IntegrationStatus, IntegrationStrategy, String) {
     if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
@@ -150,7 +156,7 @@ fn classify_file(
             "二进制文件需确认后写入".into(),
         ),
         FileChangeKind::Modify | FileChangeKind::Rename => {
-            classify_modify(fc, target_wc_path, mode)
+            classify_modify(fc, target_wc_path, target_kind, mode)
         }
     }
 }
@@ -188,9 +194,10 @@ fn classify_delete(fc: &FileChange) -> (IntegrationStatus, IntegrationStrategy, 
 fn classify_modify(
     fc: &FileChange,
     target_wc_path: &str,
+    target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> (IntegrationStatus, IntegrationStrategy, String) {
-    let patch_ok = patch_applies_cleanly(target_wc_path, fc);
+    let patch_ok = patch_applies_cleanly(target_kind, target_wc_path, fc);
     let source_before = fc
         .patch
         .as_deref()
@@ -286,7 +293,7 @@ mod tests {
     #[test]
     fn skip_when_target_equals_after() {
         let fc = modify_fc("same\n", "same\n", "@@ -1 +1 @@\n same\n");
-        let plan = build_integration_plan(&[fc], "/tmp", MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
     }
@@ -303,7 +310,7 @@ mod tests {
             patch: Some("@@ -0,0 +1,1 @@\n+new\n".into()),
             conflict_risk: None,
         };
-        let plan = build_integration_plan(&[fc], "/tmp", MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
         assert_eq!(plan.blocked_count, 1);
         assert_eq!(plan.items[0].integration_status, IntegrationStatus::Blocked);
     }
@@ -315,7 +322,7 @@ mod tests {
             "svn version\n",
             "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", MigrationMode::StrictReplay);
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::StrictReplay);
         assert_eq!(plan.blocked_count, 1);
         assert_eq!(plan.items[0].reason, "严格模式：补丁无法干净应用");
     }
@@ -327,7 +334,7 @@ mod tests {
             "new line\nunchanged\n",
             "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
         assert_eq!(plan.review_count, 1);
         assert_eq!(plan.items[0].integration_status, IntegrationStatus::Review);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::WriteAfter);
@@ -340,7 +347,7 @@ mod tests {
             "header\nincoming\nfooter\n",
             "@@ -1,3 +1,3 @@\n header\n-old\n+incoming\n footer\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
         assert_eq!(plan.blocked_count, 1);
     }
 }

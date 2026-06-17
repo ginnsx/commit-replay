@@ -1,8 +1,10 @@
-import type { PathMapping } from "../../lib/types";
-import { defaultSvnMappings } from "../../lib/constants";
+import type { PathMapping, VcsKind } from "../../lib/types";
+import { defaultMappingsForSource } from "../../lib/constants";
 import { IconPlus } from "./icons";
 
 interface Props {
+  sourceType: VcsKind;
+  targetType: VcsKind;
   branch: string;
   mappings: PathMapping[];
   customMapping: boolean;
@@ -10,13 +12,33 @@ interface Props {
   onCustomMappingChange: (custom: boolean) => void;
 }
 
+function defaultHint(sourceType: VcsKind, targetType: VcsKind, branch: string) {
+  if (sourceType === "svn") {
+    return `默认：源仓库「${branch}」下的文件变更，对应写入目标仓库根目录。两边目录结构一致时无需修改。`;
+  }
+  if (targetType === "svn") {
+    return "默认：源 Git 仓库中的文件变更，对应写入目标 SVN 工作副本根目录。";
+  }
+  return "默认：源仓库中的文件变更，对应写入目标仓库根目录。两边目录结构一致时无需修改。";
+}
+
+function customHint(sourceType: VcsKind, targetType: VcsKind) {
+  const sourceLabel = sourceType === "svn" ? "SVN" : "Git";
+  const targetLabel = targetType === "svn" ? "SVN" : "Git";
+  return `将源 ${sourceLabel} 仓库中的路径前缀，映射到目标 ${targetLabel} 仓库中的路径前缀。`;
+}
+
 export function PathMappingPanel({
+  sourceType,
+  targetType,
   branch,
   mappings,
   customMapping,
   onMappingsChange,
   onCustomMappingChange,
 }: Props) {
+  const defaults = defaultMappingsForSource(sourceType, branch);
+
   const update = (index: number, field: "from" | "to", value: string) => {
     const next = [...mappings];
     next[index] = { ...next[index], [field]: value };
@@ -25,23 +47,24 @@ export function PathMappingPanel({
 
   const toggleCustom = (checked: boolean) => {
     onCustomMappingChange(checked);
-    if (!checked) {
-      onMappingsChange(defaultSvnMappings(branch));
-    } else if (mappings.length === 0) {
-      onMappingsChange(defaultSvnMappings(branch));
+    if (!checked || mappings.length === 0) {
+      onMappingsChange(defaults);
     }
   };
+
+  const fromPlaceholder = sourceType === "svn" ? "/trunk" : ".";
+  const toPlaceholder = targetType === "svn" ? "/trunk" : ".";
 
   return (
     <div className="card path-mapping-panel">
       <h3 className="path-mapping-title">文件如何写入目标仓库</h3>
       {!customMapping ? (
         <p className="form-hint" style={{ margin: 0 }}>
-          默认：源仓库「{branch}」下的文件变更，对应写入目标仓库根目录。两边目录结构一致时无需修改。
+          {defaultHint(sourceType, targetType, branch)}
         </p>
       ) : (
         <p className="form-hint" style={{ margin: 0 }}>
-          将 SVN 提交中的路径前缀，映射到目标 Git 仓库中的路径前缀。
+          {customHint(sourceType, targetType)}
         </p>
       )}
       <label className="form-advanced-toggle" style={{ marginTop: 12 }}>
@@ -59,12 +82,12 @@ export function PathMappingPanel({
               <input
                 value={m.from}
                 onChange={(e) => update(i, "from", e.target.value)}
-                placeholder="/trunk"
+                placeholder={fromPlaceholder}
               />
               <input
                 value={m.to}
                 onChange={(e) => update(i, "to", e.target.value)}
-                placeholder="."
+                placeholder={toPlaceholder}
               />
             </div>
           ))}

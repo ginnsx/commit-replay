@@ -70,9 +70,12 @@ pub fn validate_repo_path(path: &str) -> Result<()> {
 }
 
 pub fn is_supported_migration(source_type: &str, target_type: &str) -> bool {
-    source_type == "svn" && target_type == "git"
+    matches!(
+        (source_type, target_type),
+        ("svn" | "git", "svn" | "git")
+    )
 }
 
 pub fn unsupported_combo_message(source_type: &str, target_type: &str) -> String {
-    format!("首期暂不支持 {source_type} → {target_type}，请选择 SVN 源与 Git 目标")
+    format!("暂不支持 {source_type} → {target_type} 迁移组合")
 }

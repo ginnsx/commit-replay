@@ -2,10 +2,9 @@ use tauri::State;
 
 use crate::error::AppError;
 use crate::model::ReplayUnitMeta;
-use crate::relay::{validate_repo_path};
+use crate::relay::{validate_repo_path, is_supported_migration, unsupported_combo_message};
 use crate::store::db::{decrypt_repo_pass, get_repo, repo_path_mappings, touch_repo, DbState};
-use crate::store::models::RepoType;
-use crate::vcs::{svn_reader::SvnReader, VcsReader};
+use crate::vcs::{ensure_different_repos, repo_type_str, SourceReader};
 
 #[derive(Debug, serde::Serialize)]
 pub struct CommitListItem {
@@ -19,7 +18,11 @@ pub struct CommitListItem {
 }
 
 fn meta_to_item(meta: &ReplayUnitMeta) -> CommitListItem {
-    let rev = meta.source_ref.strip_prefix("svn:").unwrap_or(&meta.source_ref);
+    let rev = meta
+        .source_ref
+        .strip_prefix("svn:")
+        .or_else(|| meta.source_ref.strip_prefix("git:"))
+        .unwrap_or(&meta.source_ref);
     CommitListItem {
         id: meta.source_ref.clone(),
         hash: rev.chars().take(7).collect(),
@@ -51,23 +54,16 @@ fn format_date_display(iso: &str) -> String {
     }
 }
 
-fn svn_reader_from_repo(
-    state: &DbState,
-    repo_id: &str,
-) -> Result<(SvnReader, String), AppError> {
-    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+fn reader_from_repo(state: &DbState, repo_id: &str) -> Result<(SourceReader, String), AppError> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     let repo = get_repo(&conn, repo_id)?
         .ok_or_else(|| AppError::Vcs(format!("repo not found: {repo_id}")))?;
-    if !matches!(repo.repo_type, RepoType::Svn) {
-        return Err(AppError::Vcs("repo must be SVN for this operation".into()));
-    }
     validate_repo_path(&repo.path)?;
     let password = decrypt_repo_pass(&repo)?;
-    let reader = SvnReader {
-        wc_path: repo.path.clone(),
-        username: repo.svn_user.clone(),
-        password,
-    };
+    let reader = SourceReader::from_repo(&repo, password)?;
     Ok((reader, repo.id.clone()))
 }
 
@@ -76,12 +72,14 @@ pub async fn list_repo_commits(
     state: State<'_, DbState>,
     repo_id: String,
     limit: usize,
-    before_revision: Option<u64>,
+    before_cursor: Option<String>,
 ) -> Result<Vec<CommitListItem>, AppError> {
-    let (reader, id) = svn_reader_from_repo(&state, &repo_id)?;
+    let (reader, id) = reader_from_repo(&state, &repo_id)?;
     let limit = limit.clamp(1, 500);
-
-    let metas = tokio::task::spawn_blocking(move || reader.list_recent_paged(limit, before_revision))
+    let cursor = before_cursor;
+    let metas = tokio::task::spawn_blocking(move || {
+        reader.list_recent_paged(limit, cursor.as_deref())
+    })
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("list commits task: {e}")))??;
 
@@ -99,7 +97,7 @@ pub fn load_changeset(
     repo_id: String,
     source_ref: String,
 ) -> Result<crate::model::ChangeSet, AppError> {
-    let (reader, _) = svn_reader_from_repo(&state, &repo_id)?;
+    let (reader, _) = reader_from_repo(&state, &repo_id)?;
     reader.load_changeset(&source_ref).map_err(Into::into)
 }
 
@@ -109,24 +107,20 @@ pub fn validate_migration_combo(
     source_id: String,
     target_id: String,
 ) -> Result<bool, AppError> {
-    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     let source = get_repo(&conn, &source_id)?
         .ok_or_else(|| AppError::Vcs("source repo not found".into()))?;
     let target = get_repo(&conn, &target_id)?
         .ok_or_else(|| AppError::Vcs("target repo not found".into()))?;
-    let st = match source.repo_type {
-        RepoType::Svn => "svn",
-        RepoType::Git => "git",
-    };
-    let tt = match target.repo_type {
-        RepoType::Svn => "svn",
-        RepoType::Git => "git",
-    };
-    if !crate::relay::is_supported_migration(st, tt) {
-        return Err(AppError::Validation(crate::relay::unsupported_combo_message(
-            st, tt,
-        )));
+    let st = repo_type_str(&source.repo_type);
+    let tt = repo_type_str(&target.repo_type);
+    if !is_supported_migration(st, tt) {
+        return Err(AppError::Validation(unsupported_combo_message(st, tt)));
     }
+    ensure_different_repos(&source, &target)?;
     Ok(true)
 }
 
@@ -135,7 +129,10 @@ pub fn get_repo_mappings(
     state: State<DbState>,
     repo_id: String,
 ) -> Result<Vec<crate::mapper::PathMapping>, AppError> {
-    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     let repo = get_repo(&conn, &repo_id)?
         .ok_or_else(|| AppError::Vcs("repo not found".into()))?;
     Ok(repo_path_mappings(&repo))
