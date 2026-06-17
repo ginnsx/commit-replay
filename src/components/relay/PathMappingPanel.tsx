@@ -47,7 +47,7 @@ export function PathMappingPanel({
 
   const toggleCustom = (checked: boolean) => {
     onCustomMappingChange(checked);
-    if (!checked || mappings.length === 0) {
+    if (checked && mappings.length === 0) {
       onMappingsChange(defaults);
     }
   };

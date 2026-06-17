@@ -3,7 +3,8 @@ use tauri::State;
 use crate::error::AppError;
 use crate::model::ReplayUnitMeta;
 use crate::relay::{validate_repo_path, is_supported_migration, unsupported_combo_message};
-use crate::store::db::{decrypt_repo_pass, get_repo, repo_path_mappings, touch_repo, DbState};
+use crate::store::db::{decrypt_repo_pass, get_repo, get_repo_pair_mapping, repo_path_mappings, save_repo_pair_mapping, touch_repo, DbState};
+use crate::store::models::RepoPairMappingInput;
 use crate::vcs::{ensure_different_repos, repo_type_str, SourceReader};
 
 #[derive(Debug, serde::Serialize)]
@@ -136,6 +137,31 @@ pub fn get_repo_mappings(
     let repo = get_repo(&conn, &repo_id)?
         .ok_or_else(|| AppError::Vcs("repo not found".into()))?;
     Ok(repo_path_mappings(&repo))
+}
+
+#[tauri::command]
+pub fn get_repo_pair_mappings(
+    state: State<DbState>,
+    source_id: String,
+    target_id: String,
+) -> Result<Option<crate::store::models::RepoPairMappingView>, AppError> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    get_repo_pair_mapping(&conn, &source_id, &target_id)
+}
+
+#[tauri::command]
+pub fn save_repo_pair_mappings(
+    state: State<DbState>,
+    input: RepoPairMappingInput,
+) -> Result<crate::store::models::RepoPairMappingView, AppError> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    save_repo_pair_mapping(&conn, input)
 }
 
 #[cfg(test)]

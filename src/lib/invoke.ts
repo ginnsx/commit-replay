@@ -13,6 +13,7 @@ import type {
   PreviewMetaResult,
   Repo,
   RepoInput,
+  RepoPairMapping,
   GitRepoInfo,
   SvnWcInfo,
 } from "./types";
@@ -148,6 +149,41 @@ export async function validateMigrationCombo(
   targetId: string,
 ): Promise<boolean> {
   return invoke("validate_migration_combo", { sourceId, targetId });
+}
+
+export async function getRepoPairMappings(
+  sourceId: string,
+  targetId: string,
+): Promise<RepoPairMapping | null> {
+  const row = await invoke<Record<string, unknown> | null>("get_repo_pair_mappings", {
+    sourceId,
+    targetId,
+  });
+  if (!row) return null;
+  return {
+    pathMappings: (row.path_mappings as PathMapping[]) ?? [],
+    customMapping: Boolean(row.custom_mapping),
+  };
+}
+
+export async function saveRepoPairMappings(
+  sourceId: string,
+  targetId: string,
+  pathMappings: PathMapping[],
+  customMapping: boolean,
+): Promise<RepoPairMapping> {
+  const row = await invoke<Record<string, unknown>>("save_repo_pair_mappings", {
+    input: {
+      source_id: sourceId,
+      target_id: targetId,
+      path_mappings: mappingArgs(pathMappings),
+      custom_mapping: customMapping,
+    },
+  });
+  return {
+    pathMappings: (row.path_mappings as PathMapping[]) ?? [],
+    customMapping: Boolean(row.custom_mapping),
+  };
 }
 
 function mappingArgs(mappings: PathMapping[]) {

@@ -6,8 +6,8 @@ use tauri::{AppHandle, Manager};
 
 use super::crypto::{decrypt_secret, encrypt_secret};
 use super::models::{
-    default_svn_mappings, EditorRecord, MigrationRecord, RepoInput, RepoRecord, RepoType,
-    RepoView, EDITOR_PRESETS,
+    default_svn_mappings, EditorRecord, MigrationRecord, RepoInput, RepoPairMappingInput,
+    RepoPairMappingRecord, RepoPairMappingView, RepoRecord, RepoType, RepoView, EDITOR_PRESETS,
 };
 use crate::error::{AppError, Result};
 use crate::mapper::PathMapping;
@@ -51,6 +51,12 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS repo_pair_mappings (
+            source_id TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            PRIMARY KEY (source_id, target_id)
         );
         ",
     )
@@ -218,6 +224,11 @@ pub fn save_repo(conn: &Connection, input: RepoInput) -> Result<RepoView> {
 pub fn delete_repo(conn: &Connection, id: &str) -> Result<()> {
     conn.execute("DELETE FROM repos WHERE id = ?1", params![id])
         .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+    conn.execute(
+        "DELETE FROM repo_pair_mappings WHERE source_id = ?1 OR target_id = ?1",
+        params![id],
+    )
+    .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
     Ok(())
 }
 
@@ -386,4 +397,53 @@ pub fn repo_path_mappings(repo: &RepoRecord) -> Vec<PathMapping> {
     } else {
         repo.path_mappings.clone()
     }
+}
+
+pub fn get_repo_pair_mapping(
+    conn: &Connection,
+    source_id: &str,
+    target_id: &str,
+) -> Result<Option<RepoPairMappingView>> {
+    let data: Option<String> = conn
+        .query_row(
+            "SELECT data FROM repo_pair_mappings WHERE source_id = ?1 AND target_id = ?2",
+            params![source_id, target_id],
+            |r| r.get(0),
+        )
+        .ok();
+    match data {
+        Some(json) => {
+            let record: RepoPairMappingRecord = serde_json::from_str(&json)
+                .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+            Ok(Some(RepoPairMappingView {
+                path_mappings: record.path_mappings,
+                custom_mapping: record.custom_mapping,
+            }))
+        }
+        None => Ok(None),
+    }
+}
+
+pub fn save_repo_pair_mapping(
+    conn: &Connection,
+    input: RepoPairMappingInput,
+) -> Result<RepoPairMappingView> {
+    let record = RepoPairMappingRecord {
+        source_id: input.source_id.clone(),
+        target_id: input.target_id.clone(),
+        path_mappings: input.path_mappings.clone(),
+        custom_mapping: input.custom_mapping,
+    };
+    let json = serde_json::to_string(&record)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+    conn.execute(
+        "INSERT INTO repo_pair_mappings (source_id, target_id, data) VALUES (?1, ?2, ?3)
+         ON CONFLICT(source_id, target_id) DO UPDATE SET data = excluded.data",
+        params![input.source_id, input.target_id, json],
+    )
+    .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+    Ok(RepoPairMappingView {
+        path_mappings: record.path_mappings,
+        custom_mapping: record.custom_mapping,
+    })
 }

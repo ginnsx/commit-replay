@@ -11,7 +11,7 @@ pub mod vcs;
 use commands::{
     migrate::execute_migration,
     preview::{build_preview, build_preview_meta, build_integration_plan_cmd, detect_conflicts, get_file_diff},
-    reader::{get_repo_mappings, list_repo_commits, load_changeset, validate_migration_combo},
+    reader::{get_repo_mappings, get_repo_pair_mappings, list_repo_commits, load_changeset, save_repo_pair_mappings, validate_migration_combo},
     settings::*,
     writer::{open_file_in_editor, open_file_in_system},
 };
@@ -53,6 +53,8 @@ pub fn run() {
             load_changeset,
             validate_migration_combo,
             get_repo_mappings,
+            get_repo_pair_mappings,
+            save_repo_pair_mappings,
             build_preview,
             build_preview_meta,
             get_file_diff,

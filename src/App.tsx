@@ -22,12 +22,14 @@ import {
   executeMigration,
   getDefaultEditorId,
   getFileDiff,
+  getRepoPairMappings,
   listEditors,
   listMigrations,
   listRepoCommits,
   listRepos,
   openFileInEditor,
   saveEditor,
+  saveRepoPairMappings,
   saveRepo,
   setDefaultEditor,
   validateMigrationCombo,
@@ -199,15 +201,69 @@ export default function App() {
   }, [step, sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!source) return;
-    setPathMappings(defaultMappingsForSource(source.type, source.branch));
-    setCustomMapping(false);
-    setPreviewMeta(null);
-  }, [sourceId, source?.branch]);
+    if (!sourceId || !targetId || !source) return;
+    let cancelled = false;
+    getRepoPairMappings(sourceId, targetId)
+      .then((saved) => {
+        if (cancelled) return;
+        if (saved) {
+          setPathMappings(saved.pathMappings);
+          setCustomMapping(saved.customMapping);
+        } else {
+          setPathMappings(defaultMappingsForSource(source.type, source.branch));
+          setCustomMapping(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPathMappings(defaultMappingsForSource(source.type, source.branch));
+          setCustomMapping(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceId, targetId, source?.type, source?.branch]);
 
   useEffect(() => {
+    if (!sourceId || !targetId) return;
     setPreviewMeta(null);
-  }, [targetId, customMapping, pathMappings]);
+  }, [sourceId, targetId, customMapping, pathMappings]);
+
+  const persistPairMappings = useCallback(
+    (mappings: PathMapping[], custom: boolean) => {
+      if (!sourceId || !targetId) return;
+      saveRepoPairMappings(sourceId, targetId, mappings, custom).catch(() => undefined);
+    },
+    [sourceId, targetId],
+  );
+
+  const handleMappingsChange = useCallback(
+    (mappings: PathMapping[]) => {
+      setPathMappings(mappings);
+      persistPairMappings(mappings, true);
+    },
+    [persistPairMappings],
+  );
+
+  const handleCustomMappingChange = useCallback(
+    (custom: boolean) => {
+      setCustomMapping(custom);
+      if (!source || !sourceId || !targetId) return;
+      if (!custom) {
+        const mappings = defaultMappingsForSource(source.type, source.branch);
+        setPathMappings(mappings);
+        persistPairMappings(mappings, false);
+      } else {
+        const mappings =
+          pathMappings.length > 0
+            ? pathMappings
+            : defaultMappingsForSource(source.type, source.branch);
+        persistPairMappings(mappings, true);
+      }
+    },
+    [source, sourceId, targetId, pathMappings, persistPairMappings],
+  );
 
   const loadPreview = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
@@ -371,6 +427,7 @@ export default function App() {
       );
       setLastMigrationId(result.migrationId);
       setMigrated(true);
+      await saveRepoPairMappings(sourceId, targetId, activeMappings, customMapping);
       await refreshMigrations();
     } catch (e) {
       setToast(<span>{(e as AppErrorPayload).message}</span>);
@@ -711,8 +768,8 @@ export default function App() {
                 branch={source.branch}
                 mappings={pathMappings}
                 customMapping={customMapping}
-                onMappingsChange={setPathMappings}
-                onCustomMappingChange={setCustomMapping}
+                onMappingsChange={handleMappingsChange}
+                onCustomMappingChange={handleCustomMappingChange}
               />
             )}
           </div>

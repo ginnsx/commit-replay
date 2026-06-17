@@ -31,6 +31,11 @@ export interface Repo {
   pathMappings: PathMapping[];
 }
 
+export interface RepoPairMapping {
+  pathMappings: PathMapping[];
+  customMapping: boolean;
+}
+
 export interface RepoInput {
   id?: string;
   name: string;
