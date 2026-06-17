@@ -72,6 +72,7 @@ pub fn derive_after(
     before: Option<&str>,
     patch: Option<&str>,
     kind: &FileChangeKind,
+    source_after: Option<&str>,
 ) -> Result<Option<String>> {
     match kind {
         FileChangeKind::Delete => Ok(None),
@@ -80,23 +81,39 @@ pub fn derive_after(
             let patch = patch.ok_or_else(|| {
                 AppError::Vcs("add change missing patch".into())
             })?;
-            Ok(Some(apply_patch_or_lines(before, patch)?))
+            Ok(Some(apply_patch_or_lines(before, patch, source_after)?))
         }
         FileChangeKind::Modify | FileChangeKind::Rename => {
             let patch = patch.ok_or_else(|| {
                 AppError::Vcs("modify change missing patch".into())
             })?;
-            Ok(Some(apply_patch_or_lines(before, patch)?))
+            Ok(Some(apply_patch_or_lines(before, patch, source_after)?))
         }
     }
 }
 
-fn apply_patch_or_lines(before: Option<&str>, patch: &str) -> Result<String> {
-    if let Ok(text) = super::patch_apply::apply_unified_patch(before, patch) {
-        return Ok(text);
-    }
+fn apply_patch_or_lines(
+    before: Option<&str>,
+    patch: &str,
+    source_after: Option<&str>,
+) -> Result<String> {
+    let expected_new = super::patch_apply::reconstruct_new_from_patch(patch);
     let old = super::patch_apply::reconstruct_old_from_patch(patch);
-    super::patch_apply::apply_unified_patch(Some(&old), patch)
+
+    if before.is_some_and(|b| normalize_lines(b) == normalize_lines(&expected_new)) {
+        return Ok(expected_new);
+    }
+    if before.is_some_and(|b| normalize_lines(b) == normalize_lines(&old)) {
+        return super::patch_apply::apply_unified_patch(before, patch);
+    }
+    if let Some(content) = source_after {
+        return Ok(content.to_string());
+    }
+    Ok(expected_new)
+}
+
+fn normalize_lines(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
@@ -107,5 +124,30 @@ mod tests {
     fn resolve_wc_path_joins() {
         let p = resolve_wc_path("C:/repo", "./src/a.rs");
         assert!(p.to_string_lossy().contains("src"));
+    }
+
+    #[test]
+    fn derive_after_uses_source_after_when_baseline_differs() {
+        use crate::preview::patch_apply::reconstruct_new_from_patch;
+
+        let patch = "@@ -381,8 +381,7 @@\n \
+             \t\t\t\"    ii.brand AS brand, \\n\" +\n \
+             -\"    pb.bin as bin,\\n\" +\n \
+             -\"    pb.remark as remark,\\n\" +\n \
+             +\"    pb.bin as binTwo,\\n\" +\n \
+             \t\t\t\"    ii.OC_OR_SCREEN_TYPE AS ocOrScreenType  \\n\" +\n";
+        let git_before = "line380\n    private Integer inventoryItemId;\n    private String itemCode;\n";
+        let svn_after = "line380\n    \"    pb.bin as binTwo,\\n\" +\n";
+        let after = derive_after(
+            Some(git_before),
+            Some(patch),
+            &FileChangeKind::Modify,
+            Some(svn_after),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(after, svn_after);
+        assert_ne!(after, reconstruct_new_from_patch(patch));
+        assert!(!after.contains("inventoryItemId"));
     }
 }

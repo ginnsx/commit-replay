@@ -5,7 +5,7 @@ use crate::{
 
 use super::VcsReader;
 use super::svn::{
-    parse_log_xml, parse_svn_revision, parse_unified_diff, svn_diff_revision,
+    parse_log_xml, parse_svn_revision, parse_unified_diff, svn_cat_file, svn_diff_revision,
     svn_log_revision_xml, svn_log_xml_paged,
     SvnCredentials,
 };
@@ -56,7 +56,8 @@ impl VcsReader for SvnReader {
 pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Result<ChangeSet> {
     let revision = parse_svn_revision(&meta.source_ref)?;
     let diff = svn_diff_revision(&reader.wc_path, &reader.creds(), revision)?;
-    let files = parse_unified_diff(&diff, Some(&reader.wc_path))?;
+    let mut files = parse_unified_diff(&diff, Some(&reader.wc_path))?;
+    attach_source_after(reader, revision, &mut files);
     Ok(ChangeSet {
         meta: ReplayUnitMeta {
             changed_paths_count: files.len(),
@@ -64,6 +65,23 @@ pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Res
         },
         files,
     })
+}
+
+fn attach_source_after(reader: &SvnReader, revision: u64, files: &mut [crate::model::FileChange]) {
+    use crate::model::FileChangeKind;
+    use std::path::Path;
+
+    for fc in files.iter_mut() {
+        if matches!(fc.kind, FileChangeKind::Delete | FileChangeKind::Binary) {
+            continue;
+        }
+        let rel = fc.path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR);
+        let file_path = Path::new(&reader.wc_path).join(rel);
+        let Ok(content) = svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy()) else {
+            continue;
+        };
+        fc.source_after = Some(content);
+    }
 }
 
 #[cfg(test)]

@@ -153,44 +153,36 @@ pub fn count_line_stats(diff: &[DiffLine]) -> (u32, u32) {
     (additions, deletions)
 }
 
-pub fn align_conflict_lines(before: &[String], after: &[String]) -> Vec<(Option<String>, Option<String>, &'static str)> {
-    let max = before.len().max(after.len());
-    let mut rows = Vec::with_capacity(max);
-    for i in 0..max {
-        let left = before.get(i).cloned();
-        let right = after.get(i).cloned();
-        let kind = match (&left, &right) {
-            (Some(l), Some(r)) if l == r => "same",
-            (None, Some(_)) => "add",
-            (Some(_), None) => "del",
-            _ => "chg",
-        };
-        rows.push((left, right, kind));
-    }
-    rows
+pub fn find_overlap_lines(before: &[String], after: &[String]) -> Option<[u32; 2]> {
+    let diff = lines_to_diff(
+        lines_vec_to_text(before).as_deref(),
+        lines_vec_to_text(after).as_deref(),
+    );
+    changed_line_range(&diff)
 }
 
-pub fn find_overlap_lines(before: &[String], after: &[String]) -> Option<[u32; 2]> {
-    let rows = align_conflict_lines(before, after);
-    let mut start: Option<u32> = None;
-    let mut end = 0u32;
-    let mut result: Option<[u32; 2]> = None;
-    for (i, (_, _, kind)) in rows.iter().enumerate() {
-        if *kind == "chg" {
-            let line = (i + 1) as u32;
-            if start.is_none() {
-                start = Some(line);
-            }
-            end = line;
-        } else if let Some(s) = start {
-            result = Some([s, end]);
-            start = None;
+fn lines_vec_to_text(lines: &[String]) -> Option<String> {
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn changed_line_range(diff: &[DiffLine]) -> Option<[u32; 2]> {
+    let mut min: Option<u32> = None;
+    let mut max = 0u32;
+    for line in diff {
+        if matches!(line.line_type, DiffLineType::Ctx) {
+            continue;
         }
+        let Some(ln) = line.old.or(line.new) else {
+            continue;
+        };
+        min = Some(min.map_or(ln, |m| m.min(ln)));
+        max = max.max(ln);
     }
-    if let Some(s) = start {
-        result = Some([s, end]);
-    }
-    result
+    min.map(|start| [start, max])
 }
 
 #[cfg(test)]
@@ -213,6 +205,19 @@ mod tests {
         assert!(lines.iter().any(|l| matches!(l.line_type, DiffLineType::Del) && l.text == "old line"));
         assert!(lines.iter().any(|l| matches!(l.line_type, DiffLineType::Add) && l.text == "new line"));
         assert!(lines.iter().any(|l| matches!(l.line_type, DiffLineType::Ctx) && l.text == "unchanged"));
+    }
+
+    #[test]
+    fn find_overlap_uses_diff_alignment() {
+        let before = vec![
+            "line1".into(),
+            "line2".into(),
+            "EXTRA".into(),
+            "line3".into(),
+        ];
+        let after = vec!["line1".into(), "line2".into(), "line3".into()];
+        let overlap = find_overlap_lines(&before, &after);
+        assert_eq!(overlap, Some([3, 3]));
     }
 
     #[test]

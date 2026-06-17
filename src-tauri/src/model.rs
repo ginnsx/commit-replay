@@ -59,6 +59,8 @@ pub struct FileChange {
     pub before: Option<String>,
     /// Expected content after apply
     pub after: Option<String>,
+    /// Post-change content on the source side (e.g. svn cat @ revision)
+    pub source_after: Option<String>,
     /// Raw unified diff hunk (text files only)
     pub patch: Option<String>,
     pub conflict_risk: Option<ConflictRisk>,

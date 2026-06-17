@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    diff::line_diff::find_overlap_lines,
+    diff::line_diff::{find_overlap_lines, lines_to_diff},
     model::{FileChange, FileChangeKind},
-    preview::patch_apply::reconstruct_old_from_patch,
+    preview::patch_apply::{reconstruct_new_from_patch, reconstruct_old_from_patch},
     preview::target_wc::{check_apply, TargetWcKind},
     relay::file_kind_to_status,
     store::models::{
@@ -27,6 +27,14 @@ fn to_lines(text: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+fn lines_to_text(lines: &[String]) -> Option<String> {
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
 fn patch_applies_cleanly(target_kind: TargetWcKind, wc_root: &str, fc: &FileChange) -> bool {
     matches!(
         check_apply(target_kind, wc_root, fc),
@@ -45,11 +53,29 @@ fn line_match_ratio(a: &str, b: &str) -> f32 {
     same as f32 / max as f32
 }
 
+fn target_has_expected_content(fc: &FileChange) -> bool {
+    if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
+        return true;
+    }
+    let Some(patch) = fc.patch.as_deref() else {
+        return false;
+    };
+    let expected = reconstruct_new_from_patch(patch);
+    match fc.kind {
+        FileChangeKind::Delete => fc.before.is_none(),
+        FileChangeKind::Binary => false,
+        _ => !expected.is_empty() && content_equal(fc.before.as_deref(), Some(&expected)),
+    }
+}
+
 fn has_meaningful_overlap(
     target_before: Option<&str>,
     source_before: Option<&str>,
     source_after: Option<&str>,
 ) -> bool {
+    if content_equal(target_before, source_after) {
+        return false;
+    }
     let Some(sb) = source_before.filter(|s| !s.is_empty()) else {
         return false;
     };
@@ -101,6 +127,12 @@ pub fn build_integration_plan(
             IntegrationStatus::Review => review_count += 1,
             IntegrationStatus::Blocked => blocked_count += 1,
         }
+        let before_lines = to_lines(fc.before.as_deref());
+        let after_lines = to_lines(fc.after.as_deref());
+        let diff = lines_to_diff(
+            lines_to_text(&before_lines).as_deref(),
+            lines_to_text(&after_lines).as_deref(),
+        );
         items.push(IntegrationItemView {
             id: path.clone(),
             path,
@@ -108,12 +140,10 @@ pub fn build_integration_plan(
             integration_status,
             strategy,
             reason,
-            overlap_lines: find_overlap_lines(
-                &to_lines(fc.before.as_deref()),
-                &to_lines(fc.after.as_deref()),
-            ),
-            before: to_lines(fc.before.as_deref()),
-            after: to_lines(fc.after.as_deref()),
+            overlap_lines: find_overlap_lines(&before_lines, &after_lines),
+            before: before_lines,
+            after: after_lines,
+            diff,
         });
     }
 
@@ -139,7 +169,7 @@ fn classify_file(
     target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> (IntegrationStatus, IntegrationStrategy, String) {
-    if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
+    if target_has_expected_content(fc) {
         return (
             IntegrationStatus::AutoOk,
             IntegrationStrategy::Skip,
@@ -162,6 +192,13 @@ fn classify_file(
 }
 
 fn classify_add(fc: &FileChange) -> (IntegrationStatus, IntegrationStrategy, String) {
+    if target_has_expected_content(fc) {
+        return (
+            IntegrationStatus::AutoOk,
+            IntegrationStrategy::Skip,
+            "目标已包含期望内容".into(),
+        );
+    }
     if fc.before.is_none() {
         return (
             IntegrationStatus::AutoOk,
@@ -285,6 +322,7 @@ mod tests {
             old_path: None,
             before: Some(before.into()),
             after: Some(after.into()),
+            source_after: None,
             patch: Some(patch.into()),
             conflict_risk: None,
         }
@@ -307,6 +345,7 @@ mod tests {
             old_path: None,
             before: Some("exists\n".into()),
             after: Some("new\n".into()),
+            source_after: None,
             patch: Some("@@ -0,0 +1,1 @@\n+new\n".into()),
             conflict_risk: None,
         };
@@ -349,5 +388,37 @@ mod tests {
         );
         let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
         assert_eq!(plan.blocked_count, 1);
+    }
+
+    #[test]
+    fn skip_when_target_already_has_patch_result() {
+        let patch = "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n";
+        let fc = modify_fc(
+            "# Project\nnew line\nunchanged\n",
+            "# Project\nnew line\nunchanged\n",
+            patch,
+        );
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        assert_eq!(plan.auto_ok_count, 1);
+        assert_eq!(plan.blocked_count, 0);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
+    }
+
+    #[test]
+    fn skip_add_when_target_file_already_matches_patch() {
+        let fc = FileChange {
+            path: "/trunk/n.txt".into(),
+            target_path: Some("n.txt".into()),
+            kind: FileChangeKind::Add,
+            old_path: None,
+            before: Some("line1\nline2\n".into()),
+            after: Some("line1\nline2\n".into()),
+            source_after: None,
+            patch: Some("@@ -0,0 +1,2 @@\n+line1\n+line2\n".into()),
+            conflict_risk: None,
+        };
+        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        assert_eq!(plan.auto_ok_count, 1);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
     }
 }
