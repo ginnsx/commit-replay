@@ -13,7 +13,7 @@ import type {
   RepoInput,
   WizardStep,
 } from "./lib/types";
-import { STEPS, COMMIT_FETCH_SIZE, COMMIT_PAGE_SIZE, defaultSvnMappings, isSupportedCombo, targetFilePath } from "./lib/constants";
+import { STEPS, COMMIT_FETCH_SIZE, COMMIT_PAGE_SIZE, defaultMappingsForSource, targetFilePath } from "./lib/constants";
 import {
   buildPreviewMeta,
   buildIntegrationPlan,
@@ -48,7 +48,6 @@ import { EditorSettings, RepoManagement } from "./components/settings/SettingsPa
 import { MigrationDetail, MigrationHistory } from "./components/settings/MigrationHistory";
 import {
   IconArrow,
-  IconCheck,
   IconChevronRight,
   IconPlus,
   IconSuccess,
@@ -78,7 +77,7 @@ export default function App() {
   const [customMapping, setCustomMapping] = useState(false);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
   const [commits, setCommits] = useState<CommitListItem[]>([]);
-  const [beforeRevision, setBeforeRevision] = useState<number | null>(null);
+  const [beforeCursor, setBeforeCursor] = useState<string | null>(null);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<AppErrorPayload | null>(null);
   const [lastBatchSize, setLastBatchSize] = useState(0);
@@ -134,7 +133,7 @@ export default function App() {
 
   const activeMappings = useMemo(() => {
     if (!source) return [];
-    return customMapping ? pathMappings : defaultSvnMappings(source.branch);
+    return customMapping ? pathMappings : defaultMappingsForSource(source.type, source.branch);
   }, [source, customMapping, pathMappings]);
 
   const completed = useMemo(() => {
@@ -173,13 +172,12 @@ export default function App() {
       setCommitsLoading(true);
       setCommitsError(null);
       try {
-        const revision = reset ? null : beforeRevision;
-        const batch = await listRepoCommits(sourceId, COMMIT_FETCH_SIZE, revision);
+        const cursor = reset ? null : beforeCursor;
+        const batch = await listRepoCommits(sourceId, COMMIT_FETCH_SIZE, cursor);
         setCommits((prev) => (reset ? batch : [...prev, ...batch]));
         if (batch.length > 0) {
           const oldest = batch[batch.length - 1];
-          const rev = Number.parseInt(oldest.sourceRef.replace(/^svn:/, ""), 10);
-          setBeforeRevision(Number.isFinite(rev) ? rev : null);
+          setBeforeCursor(oldest.sourceRef);
         }
         setLastBatchSize(batch.length);
       } catch (e) {
@@ -188,12 +186,12 @@ export default function App() {
         setCommitsLoading(false);
       }
     },
-    [sourceId, beforeRevision],
+    [sourceId, beforeCursor],
   );
 
   useEffect(() => {
     if (step === "commits" && sourceId) {
-      setBeforeRevision(null);
+      setBeforeCursor(null);
       setLastBatchSize(0);
       setCommits([]);
       loadCommits(true);
@@ -202,7 +200,7 @@ export default function App() {
 
   useEffect(() => {
     if (!source) return;
-    setPathMappings(defaultSvnMappings(source.branch));
+    setPathMappings(defaultMappingsForSource(source.type, source.branch));
     setCustomMapping(false);
     setPreviewMeta(null);
   }, [sourceId, source?.branch]);
@@ -289,9 +287,7 @@ export default function App() {
     if (step === "commits") return selectedCommits.size > 0;
     if (step === "preview") return !!previewMeta && previewMeta.files.length > 0;
     if (step === "target") {
-      if (!targetId || targetId === sourceId) return false;
-      if (!source || !target) return false;
-      return isSupportedCombo(source.type, target.type);
+      return !!targetId && targetId !== sourceId;
     }
     return false;
   };
@@ -483,8 +479,6 @@ export default function App() {
     if (step === "preview") return `${previewMeta?.files.length ?? 0} 个文件待迁移`;
     if (step === "target" && !targetId) return "请选择目标仓库";
     if (step === "target" && targetId === sourceId) return "目标不能与源相同";
-    if (step === "target" && source && target && !isSupportedCombo(source.type, target.type))
-      return "首期暂不支持该组合，请选择 SVN 源与 Git 目标";
     if (step === "migrate" && !canExecuteMigration) {
       const parts: string[] = [];
       if (pendingReview.length > 0) parts.push(`${pendingReview.length} 个待确认`);
@@ -710,8 +704,10 @@ export default function App() {
                 />
               ))}
             </div>
-            {targetId && source && isSupportedCombo(source.type, target?.type ?? "") && (
+            {targetId && source && (
               <PathMappingPanel
+                sourceType={source.type}
+                targetType={target?.type ?? "git"}
                 branch={source.branch}
                 mappings={pathMappings}
                 customMapping={customMapping}

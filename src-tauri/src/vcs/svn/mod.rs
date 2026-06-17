@@ -6,7 +6,7 @@ pub mod ref_util;
 
 pub use cli::SvnCredentials;
 pub use cli::{
-    detect_svn_branch, probe_svn_wc, svn_diff_revision, svn_log_revision_xml, svn_log_xml,
+    detect_svn_branch, probe_svn_wc, run_svn, svn_diff_revision, svn_log_revision_xml, svn_log_xml,
     svn_log_xml_paged,
 };
 pub use diff_parser::parse_unified_diff;

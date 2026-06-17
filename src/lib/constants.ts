@@ -42,8 +42,17 @@ export function migrationStats(files: { status: string; additions: number; delet
   };
 }
 
-export function isSupportedCombo(sourceType: string, targetType: string) {
-  return sourceType === "svn" && targetType === "git";
+export function isSupportedCombo(_sourceType: string, _targetType: string) {
+  return true;
+}
+
+export function defaultGitMappings() {
+  return [{ from: ".", to: "." }];
+}
+
+export function defaultMappingsForSource(sourceType: string, branch: string) {
+  if (sourceType === "svn") return defaultSvnMappings(branch);
+  return defaultGitMappings();
 }
 
 export function targetFilePath(targetPath: string, filePath: string) {

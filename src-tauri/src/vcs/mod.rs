@@ -1,7 +1,10 @@
+pub mod factory;
+pub mod git;
 pub mod git_probe;
 pub mod git_reader;
 pub mod git_writer;
 
+pub use factory::{ensure_different_repos, repo_type_str, MigrationWriter, SourceReader};
 pub use git_probe::{probe_git_repo, GitRepoInfo};
 pub mod svn;
 pub mod svn_reader;

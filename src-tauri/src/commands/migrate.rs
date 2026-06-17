@@ -2,15 +2,16 @@ use tauri::State;
 
 use crate::{
     error::AppError,
-    preview::{build_integration_plan, build_preview_plan_parallel, strategy_map, MappingInput},
+    preview::{build_integration_plan, build_preview_plan_parallel, strategy_map, MappingInput, PreviewContext},
+    relay::preview_file_with_diff,
     store::{
         db::{decrypt_repo_pass, get_repo, repo_path_mappings, save_migration, DbState},
         models::{
             CommitSnapshot, IntegrationStatus, IntegrationStrategy, MigrationMode, MigrationRecord,
-            RepoSnapshot, RepoType,
+            RepoSnapshot,
         },
     },
-    vcs::{git_writer::GitWriter, VcsWriter},
+    vcs::{ensure_different_repos, MigrationWriter},
 };
 
 #[derive(Debug, serde::Serialize)]
@@ -61,6 +62,26 @@ fn unit_strategy(
     }
 }
 
+fn preview_context(
+    source: &crate::store::models::RepoRecord,
+    target: &crate::store::models::RepoRecord,
+    path_mappings: Option<Vec<MappingInput>>,
+) -> Result<PreviewContext, AppError> {
+    let mappings: Vec<MappingInput> = if let Some(m) = path_mappings.filter(|m| !m.is_empty()) {
+        m
+    } else {
+        repo_path_mappings(source)
+            .into_iter()
+            .map(|m| MappingInput {
+                from: m.from,
+                to: m.to,
+            })
+            .collect()
+    };
+    let password = decrypt_repo_pass(source)?;
+    PreviewContext::from_repos(source, target, password, mappings).map_err(Into::into)
+}
+
 #[tauri::command]
 pub fn execute_migration(
     state: State<DbState>,
@@ -81,40 +102,25 @@ pub fn execute_migration(
         .ok_or_else(|| AppError::Vcs("source not found".into()))?;
     let target = get_repo(&conn, &target_id)?
         .ok_or_else(|| AppError::Vcs("target not found".into()))?;
-    if !matches!(source.repo_type, RepoType::Svn) || !matches!(target.repo_type, RepoType::Git) {
-        return Err(AppError::Validation("only SVN → Git supported".into()));
-    }
-    let mappings: Vec<MappingInput> = if let Some(m) = path_mappings.filter(|m| !m.is_empty()) {
-        m
-    } else {
-        repo_path_mappings(&source)
-            .into_iter()
-            .map(|m| MappingInput {
-                from: m.from,
-                to: m.to,
-            })
-            .collect()
-    };
-    let password = decrypt_repo_pass(&source)?;
-    let preview = build_preview_plan_parallel(
-        &source.path,
-        &source_refs,
-        &target.path,
-        &mappings,
-        source.svn_user.clone(),
-        password,
-    )?;
+    ensure_different_repos(&source, &target)?;
+
+    let ctx = preview_context(&source, &target, path_mappings)?;
+    let preview = build_preview_plan_parallel(&ctx, &source_refs)?;
 
     let mode = migration_mode.unwrap_or(MigrationMode::IncrementalFirst);
-    let plan = build_integration_plan(&preview.aggregated, &target.path, mode);
+    let plan = build_integration_plan(
+        &preview.aggregated,
+        &ctx.target_wc_path,
+        ctx.target_kind,
+        mode,
+    );
     let strategies = strategy_map(&plan);
     let accepted = accepted_review.unwrap_or_default();
     let resolved = resolved_blocked.unwrap_or_default();
     validate_integration_plan(&plan, &accepted, &resolved)?;
 
-    let writer = GitWriter {
-        repo_path: target.path.clone(),
-    };
+    let target_password = decrypt_repo_pass(&target)?;
+    let writer = MigrationWriter::from_repo(&target, target_password)?;
     let checkpoint = writer.prepare(&target.branch)?;
     let mut commits_applied = 0usize;
     for unit in &preview.units {
@@ -148,7 +154,7 @@ pub fn execute_migration(
     let files: Vec<crate::store::models::FileChangeView> = preview
         .aggregated
         .iter()
-        .map(|f| crate::relay::preview_file_with_diff(f))
+        .map(|f| preview_file_with_diff(f))
         .collect();
     let commits: Vec<CommitSnapshot> = preview
         .units
@@ -158,6 +164,7 @@ pub fn execute_migration(
                 .meta
                 .source_ref
                 .strip_prefix("svn:")
+                .or_else(|| u.meta.source_ref.strip_prefix("git:"))
                 .unwrap_or(&u.meta.source_ref);
             CommitSnapshot {
                 id: u.meta.source_ref.clone(),
