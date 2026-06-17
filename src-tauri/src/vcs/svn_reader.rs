@@ -32,14 +32,18 @@ impl SvnReader {
         })
     }
 
-    pub fn list_recent_paged(&self, limit: usize, offset: usize) -> Result<Vec<ReplayUnitMeta>> {
-        svn_log_xml_paged(&self.wc_path, &self.creds(), limit, offset)
+    pub fn list_recent_paged(
+        &self,
+        limit: usize,
+        before_revision: Option<u64>,
+    ) -> Result<Vec<ReplayUnitMeta>> {
+        svn_log_xml_paged(&self.wc_path, &self.creds(), limit, before_revision)
     }
 }
 
 impl VcsReader for SvnReader {
     fn list_recent(&self, limit: usize) -> Result<Vec<ReplayUnitMeta>> {
-        self.list_recent_paged(limit, 0)
+        self.list_recent_paged(limit, None)
     }
 
     fn load_changeset(&self, source_ref: &str) -> Result<ChangeSet> {

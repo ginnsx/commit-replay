@@ -2,6 +2,8 @@ use std::process::Command;
 
 use crate::error::{AppError, Result};
 
+use super::log_parser::parse_log_xml;
+
 #[derive(Debug, Clone, Default)]
 pub struct SvnCredentials {
     pub username: Option<String>,
@@ -68,17 +70,28 @@ pub fn svn_log_xml(url: &str, creds: &SvnCredentials, limit: usize) -> Result<St
     )
 }
 
-/// Paginated log: skip `offset` newest entries, return up to `limit`.
+/// Paginated log: return up to `limit` entries older than `before_revision` (exclusive).
+/// `before_revision = None` fetches from HEAD.
 pub fn svn_log_xml_paged(
     url: &str,
     creds: &SvnCredentials,
     limit: usize,
-    offset: usize,
+    before_revision: Option<u64>,
 ) -> Result<Vec<crate::model::ReplayUnitMeta>> {
-    let fetch = limit.saturating_add(offset).max(limit);
-    let xml = svn_log_xml(url, creds, fetch)?;
-    let entries = super::log_parser::parse_log_xml(&xml)?;
-    Ok(super::log_parser::slice_log_entries(entries, offset, limit))
+    let limit_s = limit.to_string();
+    let xml = match before_revision {
+        None => run_svn(url, creds, &["log", "--xml", "-v", "-l", &limit_s])?,
+        Some(rev) if rev <= 1 => return Ok(Vec::new()),
+        Some(rev) => {
+            let range = format!("{}:1", rev - 1);
+            run_svn(
+                url,
+                creds,
+                &["log", "--xml", "-v", "-l", &limit_s, "-r", &range],
+            )?
+        }
+    };
+    parse_log_xml(&xml)
 }
 
 pub fn svn_diff_revision(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {

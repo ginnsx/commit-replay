@@ -136,3 +136,12 @@ export function IconChevronDown() {
     </svg>
   );
 }
+
+export function IconSearch() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="6" cy="6" r="4" />
+      <path d="M9 9l3 3" />
+    </svg>
+  );
+}

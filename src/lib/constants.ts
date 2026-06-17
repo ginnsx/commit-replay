@@ -1,5 +1,8 @@
 import type { WizardStep } from "../lib/types";
 
+export const COMMIT_PAGE_SIZE = 500;
+export const COMMIT_FETCH_SIZE = 500;
+
 export const STEPS: { id: WizardStep; label: string; num: number }[] = [
   { id: "source", label: "源仓库", num: 1 },
   { id: "commits", label: "选择提交", num: 2 },

@@ -13,7 +13,7 @@ import type {
   RepoInput,
   WizardStep,
 } from "./lib/types";
-import { STEPS, defaultSvnMappings, isSupportedCombo, targetFilePath } from "./lib/constants";
+import { STEPS, COMMIT_FETCH_SIZE, COMMIT_PAGE_SIZE, defaultSvnMappings, isSupportedCombo, targetFilePath } from "./lib/constants";
 import {
   buildPreviewMeta,
   buildIntegrationPlan,
@@ -38,7 +38,7 @@ import { BottomBar } from "./components/relay/BottomBar";
 import { Toast } from "./components/relay/Toast";
 import { RepoCard } from "./components/relay/RepoCard";
 import { RepoModal, EditorAppModal } from "./components/relay/RepoModal";
-import { CommitRow } from "./components/relay/CommitRow";
+import { CommitPicker } from "./components/relay/CommitPicker";
 import { FileTree } from "./components/relay/FileTree";
 import { DiffView } from "./components/relay/DiffView";
 import { ConflictWorkspace } from "./components/relay/ConflictWorkspace";
@@ -79,9 +79,10 @@ export default function App() {
   const [customMapping, setCustomMapping] = useState(false);
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
   const [commits, setCommits] = useState<CommitListItem[]>([]);
-  const [commitOffset, setCommitOffset] = useState(0);
+  const [beforeRevision, setBeforeRevision] = useState<number | null>(null);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<AppErrorPayload | null>(null);
+  const [lastBatchSize, setLastBatchSize] = useState(0);
 
   const [previewMeta, setPreviewMeta] = useState<PreviewMetaResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -174,22 +175,29 @@ export default function App() {
       setCommitsLoading(true);
       setCommitsError(null);
       try {
-        const offset = reset ? 0 : commitOffset;
-        const batch = await listRepoCommits(sourceId, 50, offset);
+        const revision = reset ? null : beforeRevision;
+        const batch = await listRepoCommits(sourceId, COMMIT_FETCH_SIZE, revision);
         setCommits((prev) => (reset ? batch : [...prev, ...batch]));
-        setCommitOffset(offset + batch.length);
+        if (batch.length > 0) {
+          const oldest = batch[batch.length - 1];
+          const rev = Number.parseInt(oldest.sourceRef.replace(/^svn:/, ""), 10);
+          setBeforeRevision(Number.isFinite(rev) ? rev : null);
+        }
+        setLastBatchSize(batch.length);
       } catch (e) {
         setCommitsError(e as AppErrorPayload);
       } finally {
         setCommitsLoading(false);
       }
     },
-    [sourceId, commitOffset],
+    [sourceId, beforeRevision],
   );
 
   useEffect(() => {
     if (step === "commits" && sourceId) {
-      setCommitOffset(0);
+      setBeforeRevision(null);
+      setLastBatchSize(0);
+      setCommits([]);
       loadCommits(true);
     }
   }, [step, sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -428,6 +436,26 @@ export default function App() {
     setMigrationMode(mode);
   };
 
+  const toggleCommit = (id: string) => {
+    setSelectedCommits((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectCommits = (ids: string[], select: boolean) => {
+    setSelectedCommits((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => {
+        if (select) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
   const resetMigration = () => {
     setMigrated(false);
     setStep("source");
@@ -563,16 +591,6 @@ export default function App() {
                 {selectedCommits.size} 条
               </p>
             </div>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                if (selectedCommits.size === commits.length) setSelectedCommits(new Set());
-                else setSelectedCommits(new Set(commits.map((c) => c.id)));
-              }}
-            >
-              {selectedCommits.size === commits.length && commits.length > 0 ? "取消全选" : "全选"}
-            </button>
           </div>
           <div className="main-content main-content--scroll">
             {commitsError && (
@@ -585,33 +603,16 @@ export default function App() {
                 )}
               </div>
             )}
-            <div className="card">
-              <div className="commit-list">
-                {commits.map((c) => (
-                  <CommitRow
-                    key={c.id}
-                    commit={c}
-                    selected={selectedCommits.has(c.id)}
-                    onToggle={() =>
-                      setSelectedCommits((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(c.id)) next.delete(c.id);
-                        else next.add(c.id);
-                        return next;
-                      })
-                    }
-                  />
-                ))}
-              </div>
-              {commitsLoading && <div className="empty-state"><p>加载中…</p></div>}
-              {!commitsLoading && commits.length >= 50 && (
-                <div className="empty-state">
-                  <button type="button" className="btn btn-ghost" onClick={() => loadCommits(false)}>
-                    加载更多
-                  </button>
-                </div>
-              )}
-            </div>
+            <CommitPicker
+              commits={commits}
+              pageSize={COMMIT_PAGE_SIZE}
+              selectedIds={selectedCommits}
+              onToggle={toggleCommit}
+              onSelectMany={selectCommits}
+              hasRemoteMore={lastBatchSize === COMMIT_FETCH_SIZE}
+              onFetchRemote={() => loadCommits(false)}
+              fetchingRemote={commitsLoading}
+            />
           </div>
         </div>
       );
