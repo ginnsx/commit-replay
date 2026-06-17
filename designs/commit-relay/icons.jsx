@@ -110,6 +110,13 @@ const IconExternal = () => (
   </svg>
 );
 
+const IconSearch = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="6" cy="6" r="4"/>
+    <path d="M9 9l3 3"/>
+  </svg>
+);
+
 const IconChevronDown = () => (
   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
     <path d="M2 3.5l3 3 3-3"/>
@@ -117,7 +124,7 @@ const IconChevronDown = () => (
 );
 
 Object.assign(window, {
-  IconGit, IconSvn, IconFolder, IconChevronRight, IconChevronLeft, IconHistory, IconCheck,
+  IconGit, IconSvn, IconFolder, IconChevronRight, IconChevronLeft, IconHistory, IconSearch, IconCheck,
   IconPlus, IconEdit, IconTrash, IconSettings, IconWarn,
   IconArrow, IconClose, IconMin, IconMax, IconSuccess,
   IconExternal, IconChevronDown,

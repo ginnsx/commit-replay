@@ -42,6 +42,17 @@ function App() {
     });
   };
 
+  const selectCommits = (ids, select) => {
+    setSelectedCommits((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => {
+        if (select) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
   const goStep = (id) => {
     setShowRepos(false);
     setStep(id);
@@ -264,29 +275,15 @@ function App() {
                 来自 <strong>{source?.name}</strong> · 最近 {COMMITS.length} 条提交，已选 {selectedCommits.size} 条
               </p>
             </div>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                if (selectedCommits.size === COMMITS.length) setSelectedCommits(new Set());
-                else setSelectedCommits(new Set(COMMITS.map((c) => c.id)));
-              }}
-            >
-              {selectedCommits.size === COMMITS.length ? "取消全选" : "全选"}
-            </button>
           </div>
           <div className="main-content main-content--scroll">
-            <div className="card">
-              <div className="commit-list">
-                {COMMITS.map((c) => (
-                  <CommitRow
-                    key={c.id}
-                    commit={c}
-                    selected={selectedCommits.has(c.id)}
-                    onToggle={() => toggleCommit(c.id)}
-                  />
-                ))}
-              </div>
-            </div>
+            <CommitPicker
+              commits={COMMITS}
+              pageSize={COMMIT_PAGE_SIZE}
+              selectedIds={selectedCommits}
+              onToggle={toggleCommit}
+              onSelectMany={selectCommits}
+            />
           </div>
         </div>
       );
