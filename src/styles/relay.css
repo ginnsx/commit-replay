@@ -32,7 +32,7 @@
       --font: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
       --mono: "Cascadia Code", "Cascadia Mono", "Consolas", monospace;
       --titlebar-h: 36px;
-      --sidebar-w: 148px;
+      --sidebar-w: 176px;
       --file-list-basis: 30%;
       --file-list-min: 260px;
       --file-list-max: 380px;
@@ -171,13 +171,13 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
-      padding: 0 6px;
+      padding: 0 8px;
     }
     .step-item {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 8px;
+      padding: 8px 10px;
       border-radius: var(--radius);
       color: var(--text-secondary);
       transition: background 0.12s, color 0.12s;
@@ -212,11 +212,11 @@
       opacity: 1;
     }
     .step-item.done .step-num { background: var(--add); border-color: var(--add); }
-    .step-label { font-size: 12px; font-weight: 500; }
+    .step-label { font-size: 13px; font-weight: 500; }
 
     .rail-footer {
       margin-top: auto;
-      padding: 10px 6px;
+      padding: 10px 8px;
       border-top: 1px solid var(--border);
     }
     .rail-footer-btn {
@@ -224,7 +224,7 @@
       align-items: center;
       gap: 8px;
       width: 100%;
-      padding: 8px 8px;
+      padding: 8px 10px;
       border-radius: var(--radius);
       color: var(--text-secondary);
       transition: background 0.12s;
