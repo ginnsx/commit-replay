@@ -13,6 +13,7 @@ import type {
   PreviewMetaResult,
   Repo,
   RepoInput,
+  GitRepoInfo,
   SvnWcInfo,
 } from "./types";
 
@@ -109,6 +110,15 @@ export async function probeSvnWc(path: string): Promise<SvnWcInfo> {
     branch: String(r.branch),
     relativeUrl: String(r.relative_url),
     url: String(r.url),
+  };
+}
+
+export async function probeGitRepo(path: string): Promise<GitRepoInfo> {
+  const r = await invoke<Record<string, unknown>>("relay_probe_git_repo", { path });
+  return {
+    branch: String(r.branch),
+    branches: (r.branches as string[]) ?? [],
+    remoteUrl: r.remote_url ? String(r.remote_url) : undefined,
   };
 }
 

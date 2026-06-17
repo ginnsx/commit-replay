@@ -109,8 +109,8 @@ export function EditorSettings({
           >
             <span className="editor-option-radio" />
             <span className="editor-option-info">
-              <span className="editor-option-name">{e.name}</span>
-              <span className="editor-option-exe">{e.exe}</span>
+              <div className="editor-option-name">{e.name}</div>
+              <div className="editor-option-exe">{e.exe}</div>
             </span>
             {e.custom && (
               <button
