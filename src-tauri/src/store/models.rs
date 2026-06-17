@@ -189,6 +189,28 @@ pub struct MigrationRecord {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoPairMappingRecord {
+    pub source_id: String,
+    pub target_id: String,
+    pub path_mappings: Vec<PathMapping>,
+    pub custom_mapping: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoPairMappingInput {
+    pub source_id: String,
+    pub target_id: String,
+    pub path_mappings: Vec<PathMapping>,
+    pub custom_mapping: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoPairMappingView {
+    pub path_mappings: Vec<PathMapping>,
+    pub custom_mapping: bool,
+}
+
 pub fn default_svn_mappings(branch: &str) -> Vec<PathMapping> {
     let trimmed = branch.trim().trim_matches('/');
     let from_branch = if trimmed.is_empty() {
