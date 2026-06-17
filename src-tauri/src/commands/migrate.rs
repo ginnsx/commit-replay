@@ -82,42 +82,47 @@ fn preview_context(
     PreviewContext::from_repos(source, target, password, mappings).map_err(Into::into)
 }
 
-#[tauri::command]
-pub fn execute_migration(
-    state: State<DbState>,
-    source_id: String,
-    target_id: String,
+struct MigrationWork {
+    source: crate::store::models::RepoRecord,
+    target: crate::store::models::RepoRecord,
     source_refs: Vec<String>,
     conflicts_resolved: u32,
     path_mappings: Option<Vec<MappingInput>>,
-    migration_mode: Option<MigrationMode>,
-    accepted_review: Option<Vec<String>>,
-    resolved_blocked: Option<Vec<String>>,
-) -> Result<MigrationResult, AppError> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
-    let source = get_repo(&conn, &source_id)?
-        .ok_or_else(|| AppError::Vcs("source not found".into()))?;
-    let target = get_repo(&conn, &target_id)?
-        .ok_or_else(|| AppError::Vcs("target not found".into()))?;
+    migration_mode: MigrationMode,
+    accepted_review: Vec<String>,
+    resolved_blocked: Vec<String>,
+}
+
+struct MigrationOutput {
+    result: MigrationResult,
+    record: MigrationRecord,
+}
+
+fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
+    let MigrationWork {
+        source,
+        target,
+        source_refs,
+        conflicts_resolved,
+        path_mappings,
+        migration_mode,
+        accepted_review,
+        resolved_blocked,
+    } = work;
+
     ensure_different_repos(&source, &target)?;
 
     let ctx = preview_context(&source, &target, path_mappings)?;
     let preview = build_preview_plan_parallel(&ctx, &source_refs)?;
 
-    let mode = migration_mode.unwrap_or(MigrationMode::IncrementalFirst);
     let plan = build_integration_plan(
         &preview.aggregated,
         &ctx.target_wc_path,
         ctx.target_kind,
-        mode,
+        migration_mode,
     );
     let strategies = strategy_map(&plan);
-    let accepted = accepted_review.unwrap_or_default();
-    let resolved = resolved_blocked.unwrap_or_default();
-    validate_integration_plan(&plan, &accepted, &resolved)?;
+    validate_integration_plan(&plan, &accepted_review, &resolved_blocked)?;
 
     let target_password = decrypt_repo_pass(&target)?;
     let writer = MigrationWriter::from_repo(&target, target_password)?;
@@ -178,7 +183,7 @@ pub fn execute_migration(
         .collect();
 
     let migration_id = format!("m{}", chrono::Utc::now().timestamp_millis());
-    let resolved_count = conflicts_resolved.max(resolved.len() as u32);
+    let resolved_count = conflicts_resolved.max(resolved_blocked.len() as u32);
     let record = MigrationRecord {
         id: migration_id.clone(),
         completed_at: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
@@ -199,11 +204,59 @@ pub fn execute_migration(
         conflicts_resolved: resolved_count,
         status: "success".into(),
     };
-    save_migration(&conn, record)?;
 
-    Ok(MigrationResult {
-        migration_id,
-        commits_applied,
-        files_changed: preview.aggregated.len(),
+    Ok(MigrationOutput {
+        result: MigrationResult {
+            migration_id: migration_id.clone(),
+            commits_applied,
+            files_changed: preview.aggregated.len(),
+        },
+        record,
     })
+}
+
+#[tauri::command]
+pub async fn execute_migration(
+    state: State<'_, DbState>,
+    source_id: String,
+    target_id: String,
+    source_refs: Vec<String>,
+    conflicts_resolved: u32,
+    path_mappings: Option<Vec<MappingInput>>,
+    migration_mode: Option<MigrationMode>,
+    accepted_review: Option<Vec<String>>,
+    resolved_blocked: Option<Vec<String>>,
+) -> Result<MigrationResult, AppError> {
+    let work = {
+        let conn = state
+            .0
+            .lock()
+            .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+        let source = get_repo(&conn, &source_id)?
+            .ok_or_else(|| AppError::Vcs("source not found".into()))?;
+        let target = get_repo(&conn, &target_id)?
+            .ok_or_else(|| AppError::Vcs("target not found".into()))?;
+        MigrationWork {
+            source,
+            target,
+            source_refs,
+            conflicts_resolved,
+            path_mappings,
+            migration_mode: migration_mode.unwrap_or(MigrationMode::IncrementalFirst),
+            accepted_review: accepted_review.unwrap_or_default(),
+            resolved_blocked: resolved_blocked.unwrap_or_default(),
+        }
+    };
+
+    let output = tokio::task::spawn_blocking(move || run_migration(work))
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("migration task: {e}")))??;
+
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    save_migration(&conn, output.record)?;
+
+    Ok(output.result)
 }

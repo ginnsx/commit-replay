@@ -118,14 +118,16 @@ pub fn get_file_diff(
 }
 
 fn integration_plan_for_repos(
-    state: &DbState,
-    source_id: &str,
-    target_id: &str,
+    source: &crate::store::models::RepoRecord,
+    target: &crate::store::models::RepoRecord,
     source_refs: &[String],
     path_mappings: Option<Vec<MappingInput>>,
     mode: MigrationMode,
 ) -> Result<IntegrationPlanResult, AppError> {
-    let ctx = preview_context(state, source_id, target_id, path_mappings)?;
+    ensure_different_repos(source, target)?;
+    let mappings = resolve_mappings(source, path_mappings);
+    let password = decrypt_repo_pass(source)?;
+    let ctx = PreviewContext::from_repos(source, target, password, mappings)?;
     let preview = build_preview_plan_parallel(&ctx, source_refs)?;
     Ok(build_integration_plan(
         &preview.aggregated,
@@ -136,22 +138,31 @@ fn integration_plan_for_repos(
 }
 
 #[tauri::command]
-pub fn build_integration_plan_cmd(
-    state: State<DbState>,
+pub async fn build_integration_plan_cmd(
+    state: State<'_, DbState>,
     source_id: String,
     target_id: String,
     source_refs: Vec<String>,
     path_mappings: Option<Vec<MappingInput>>,
     mode: Option<MigrationMode>,
 ) -> Result<IntegrationPlanResult, AppError> {
-    integration_plan_for_repos(
-        &state,
-        &source_id,
-        &target_id,
-        &source_refs,
-        path_mappings,
-        mode.unwrap_or(MigrationMode::IncrementalFirst),
-    )
+    let (source, target, mode) = {
+        let conn = state
+            .0
+            .lock()
+            .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+        let source = get_repo(&conn, &source_id)?
+            .ok_or_else(|| AppError::Vcs("source repo not found".into()))?;
+        let target = get_repo(&conn, &target_id)?
+            .ok_or_else(|| AppError::Vcs("target repo not found".into()))?;
+        (source, target, mode.unwrap_or(MigrationMode::IncrementalFirst))
+    };
+
+    tokio::task::spawn_blocking(move || {
+        integration_plan_for_repos(&source, &target, &source_refs, path_mappings, mode)
+    })
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("integration plan task: {e}")))?
 }
 
 /// Legacy alias — returns review + blocked items only.
@@ -164,10 +175,17 @@ pub fn detect_conflicts(
     path_mappings: Option<Vec<MappingInput>>,
 ) -> Result<Vec<crate::store::models::IntegrationItemView>, AppError> {
     use crate::store::models::IntegrationStatus;
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let source = get_repo(&conn, &source_id)?
+        .ok_or_else(|| AppError::Vcs("source repo not found".into()))?;
+    let target = get_repo(&conn, &target_id)?
+        .ok_or_else(|| AppError::Vcs("target repo not found".into()))?;
     let plan = integration_plan_for_repos(
-        &state,
-        &source_id,
-        &target_id,
+        &source,
+        &target,
         &source_refs,
         path_mappings,
         MigrationMode::IncrementalFirst,
