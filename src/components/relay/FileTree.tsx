@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { FileChangeView } from "../../lib/types";
+import { splitFilePath } from "../../lib/constants";
 import { StatusBadge } from "./Badges";
 
 export function FileTree({
@@ -19,7 +20,7 @@ export function FileTree({
   const virtualizer = useVirtualizer({
     count: files.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 34,
+    estimateSize: () => 48,
     overscan: 8,
   });
 
@@ -37,6 +38,7 @@ export function FileTree({
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((item) => {
             const f = files[item.index];
+            const { dir, name } = splitFilePath(f.path);
             return (
               <div
                 key={f.id}
@@ -51,7 +53,10 @@ export function FileTree({
                 onClick={() => onSelect(f.id)}
               >
                 <StatusBadge status={f.status} />
-                <span className="file-item-path">{f.path}</span>
+                <div className="file-item-path" title={f.path}>
+                  <span className="file-item-name">{name}</span>
+                  {dir ? <span className="file-item-dir">{dir}</span> : null}
+                </div>
               </div>
             );
           })}

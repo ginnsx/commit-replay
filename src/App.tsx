@@ -701,7 +701,7 @@ export default function App() {
     if (step === "preview") {
       const files = previewMeta?.files ?? [];
       return (
-        <div className="main-screen">
+        <div className="main-screen main-screen--code">
           <div className="main-header">
             <div>
               <h1>变更预览</h1>
@@ -846,7 +846,7 @@ export default function App() {
       }
 
       return (
-        <div className="main-screen">
+        <div className="main-screen main-screen--code">
           <div className="main-header">
             <div>
               <h1>确认迁移</h1>

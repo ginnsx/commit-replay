@@ -32,7 +32,10 @@
       --font: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
       --mono: "Cascadia Code", "Cascadia Mono", "Consolas", monospace;
       --titlebar-h: 36px;
-      --sidebar-w: 220px;
+      --sidebar-w: 148px;
+      --file-list-basis: 30%;
+      --file-list-min: 260px;
+      --file-list-max: 380px;
       --repo-panel-w: 260px;
     }
 
@@ -86,7 +89,7 @@
       border: 1px solid var(--border-strong);
       border-radius: 8px;
       overflow: hidden;
-      margin: 4px;
+      margin: 2px;
       box-shadow: var(--shadow);
     }
 
@@ -157,7 +160,7 @@
       flex-shrink: 0;
     }
     .step-rail-header {
-      padding: 16px 14px 12px;
+      padding: 12px 10px 8px;
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.06em;
@@ -168,13 +171,13 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
-      padding: 0 8px;
+      padding: 0 6px;
     }
     .step-item {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 9px 10px;
+      gap: 8px;
+      padding: 8px 8px;
       border-radius: var(--radius);
       color: var(--text-secondary);
       transition: background 0.12s, color 0.12s;
@@ -209,11 +212,11 @@
       opacity: 1;
     }
     .step-item.done .step-num { background: var(--add); border-color: var(--add); }
-    .step-label { font-size: 13px; font-weight: 500; }
+    .step-label { font-size: 12px; font-weight: 500; }
 
     .rail-footer {
       margin-top: auto;
-      padding: 12px 8px;
+      padding: 10px 6px;
       border-top: 1px solid var(--border);
     }
     .rail-footer-btn {
@@ -221,7 +224,7 @@
       align-items: center;
       gap: 8px;
       width: 100%;
-      padding: 9px 10px;
+      padding: 8px 8px;
       border-radius: var(--radius);
       color: var(--text-secondary);
       transition: background 0.12s;
@@ -248,26 +251,32 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 20px 24px 12px;
+      padding: 12px 12px 8px;
       flex-shrink: 0;
     }
     .main-header h1 {
-      font-size: 20px;
+      font-size: 17px;
       font-weight: 600;
       letter-spacing: -0.02em;
     }
     .main-header p {
-      margin-top: 4px;
+      margin-top: 2px;
       color: var(--text-secondary);
-      font-size: 13px;
+      font-size: 12px;
+    }
+    .main-screen--code .main-header {
+      padding: 8px 12px 6px;
+    }
+    .main-screen--code .main-header p {
+      display: none;
     }
     .main-content {
       flex: 1;
       min-height: 0;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      padding: 0 24px 16px;
+      gap: 8px;
+      padding: 0 12px 12px;
       overflow: hidden;
     }
     .main-content--scroll {
@@ -279,7 +288,7 @@
       min-height: 0;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
       overflow: hidden;
     }
     .main-content--commits > .integration-workspace {
@@ -291,7 +300,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 24px;
+      padding: 10px 12px;
       border-top: 1px solid var(--border);
       background: var(--bg-base);
       flex-shrink: 0;
@@ -561,11 +570,20 @@
     }
 
     .preview-layout {
-      display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 12px;
+      display: flex;
+      gap: 8px;
       flex: 1;
       min-height: 0;
+      overflow: hidden;
+    }
+    .preview-layout > .file-tree {
+      flex: 0 0 var(--file-list-basis);
+      min-width: var(--file-list-min);
+      max-width: var(--file-list-max);
+    }
+    .preview-layout > .diff-panel {
+      flex: 1;
+      min-width: 0;
     }
     .preview-layout > * {
       min-height: 0;
@@ -592,9 +610,9 @@
     }
     .file-item {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
-      padding: 7px 14px;
+      padding: 8px 14px;
       cursor: pointer;
       font-family: var(--mono);
       font-size: 12px;
@@ -606,7 +624,29 @@
       background: var(--accent-dim);
       border-left-color: var(--accent);
     }
-    .file-item-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-item-path {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .file-item-name {
+      font-weight: 500;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.35;
+    }
+    .file-item-dir {
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.35;
+    }
 
     .diff-panel {
       background: var(--bg-base);
@@ -635,12 +675,12 @@
     }
     .diff-line {
       display: flex;
-      padding: 0 12px;
+      padding: 0 8px;
     }
     .diff-ln {
-      width: 40px;
+      width: 32px;
       text-align: right;
-      padding-right: 12px;
+      padding-right: 8px;
       color: var(--text-muted);
       user-select: none;
       flex-shrink: 0;
@@ -656,8 +696,8 @@
 
     .summary-bar {
       display: flex;
-      gap: 16px;
-      padding: 12px 16px;
+      gap: 12px;
+      padding: 8px 12px;
       background: var(--bg-raised);
       border-radius: var(--radius);
       flex-shrink: 0;
@@ -779,22 +819,22 @@
       flex: 1 1 0;
       min-height: 0;
       height: 0;
-      gap: 12px;
+      gap: 8px;
       overflow: hidden;
     }
     .integration-workspace {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
       flex: 1 1 0;
       min-height: 0;
       overflow: hidden;
     }
     .integration-summary {
-      padding: 12px 16px;
+      padding: 8px 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       flex-shrink: 0;
     }
     .integration-summary-stats {
@@ -824,9 +864,9 @@
       color: var(--add);
     }
     .integration-file-list {
-      flex: 0 0 32%;
-      min-width: 260px;
-      max-width: 400px;
+      flex: 0 0 var(--file-list-basis);
+      min-width: var(--file-list-min);
+      max-width: var(--file-list-max);
       padding: 0;
       overflow: hidden;
       display: flex;
@@ -1053,9 +1093,9 @@
     .conflict-row.add { background: rgba(63, 185, 80, 0.06); }
     .conflict-row.del { background: rgba(248, 81, 73, 0.06); }
     .conflict-ln {
-      width: 36px;
+      width: 28px;
       text-align: right;
-      padding: 1px 8px 1px 4px;
+      padding: 1px 6px 1px 2px;
       color: var(--text-muted);
       user-select: none;
       flex-shrink: 0;
@@ -1516,6 +1556,20 @@
       border-radius: var(--radius-lg);
       overflow: hidden;
       background: var(--bg-base);
+    }
+    .history-preview-layout .file-tree {
+      flex: 0 0 var(--file-list-basis);
+      min-width: var(--file-list-min);
+      max-width: var(--file-list-max);
+      border: none;
+      border-radius: 0;
+      border-right: 1px solid var(--border);
+    }
+    .history-preview-layout .diff-panel {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      border-radius: 0;
     }
     .commit-row.readonly { cursor: default; }
     .commit-row.readonly .commit-check {
