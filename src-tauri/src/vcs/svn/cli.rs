@@ -64,8 +64,21 @@ pub fn svn_log_xml(url: &str, creds: &SvnCredentials, limit: usize) -> Result<St
     run_svn(
         url,
         creds,
-        &["log", "--xml", "-l", &limit.to_string()],
+        &["log", "--xml", "-v", "-l", &limit.to_string()],
     )
+}
+
+/// Paginated log: skip `offset` newest entries, return up to `limit`.
+pub fn svn_log_xml_paged(
+    url: &str,
+    creds: &SvnCredentials,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<crate::model::ReplayUnitMeta>> {
+    let fetch = limit.saturating_add(offset).max(limit);
+    let xml = svn_log_xml(url, creds, fetch)?;
+    let entries = super::log_parser::parse_log_xml(&xml)?;
+    Ok(super::log_parser::slice_log_entries(entries, offset, limit))
 }
 
 pub fn svn_diff_revision(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {
@@ -78,6 +91,20 @@ pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) ->
         creds,
         &["log", "--xml", "-r", &revision.to_string(), "-l", "1"],
     )
+}
+
+pub fn svn_info_xml(wc_path: &str) -> Result<String> {
+    run_svn(wc_path, &SvnCredentials::default(), &["info", "--xml"])
+}
+
+pub fn probe_svn_wc(wc_path: &str) -> Result<super::info_parser::SvnWcInfo> {
+    let xml = svn_info_xml(wc_path)?;
+    super::info_parser::parse_info_xml(&xml)
+}
+
+/// Detect the last segment of the working copy's SVN relative URL (e.g. `hk`, `trunk`).
+pub fn detect_svn_branch(wc_path: &str) -> Option<String> {
+    probe_svn_wc(wc_path).ok().map(|info| info.branch)
 }
 
 #[cfg(test)]

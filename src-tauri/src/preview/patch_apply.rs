@@ -12,8 +12,17 @@ pub fn apply_unified_patch(base: Option<&str>, patch: &str) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
-/// When patch apply fails, build a best-effort "after" from added lines only (preview fallback).
-pub fn extract_added_lines(patch: &str) -> String {
+/// Reconstruct pre-change file content from unified diff hunks.
+pub fn reconstruct_old_from_patch(patch: &str) -> String {
+    collect_patch_side(patch, true)
+}
+
+/// Reconstruct post-change file content from unified diff hunks.
+pub fn reconstruct_new_from_patch(patch: &str) -> String {
+    collect_patch_side(patch, false)
+}
+
+fn collect_patch_side(patch: &str, old_side: bool) -> String {
     let mut out = Vec::new();
     let mut in_hunk = false;
     for line in patch.lines() {
@@ -24,11 +33,18 @@ pub fn extract_added_lines(patch: &str) -> String {
         if !in_hunk {
             continue;
         }
-        if line.starts_with("+++ ") || line.starts_with("--- ") || line.starts_with("Index:") {
+        if line.starts_with("+++ ")
+            || line.starts_with("--- ")
+            || line.starts_with("Index:")
+            || line.starts_with('\\')
+        {
             continue;
         }
-        if line.starts_with('+') {
-            out.push(line[1..].to_string());
+        match line.chars().next() {
+            Some(' ') => out.push(line[1..].to_string()),
+            Some('-') if old_side => out.push(line[1..].to_string()),
+            Some('+') if !old_side => out.push(line[1..].to_string()),
+            _ => {}
         }
     }
     out.join("\n")
@@ -170,5 +186,28 @@ mod tests {
         let patch = "@@ -2576,5 +2576,6 @@\n+only new line\n";
         let out = apply_unified_patch(None, patch).unwrap();
         assert_eq!(out, "only new line");
+    }
+
+    #[test]
+    fn reconstruct_old_and_new_from_modify_patch() {
+        let patch = "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n";
+        assert_eq!(
+            reconstruct_old_from_patch(patch),
+            "# Project\nold line\nunchanged"
+        );
+        assert_eq!(
+            reconstruct_new_from_patch(patch),
+            "# Project\nnew line\nunchanged"
+        );
+    }
+
+    #[test]
+    fn apply_falls_back_to_patch_base_when_target_differs() {
+        let patch = "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n";
+        let target_before = "totally\nunrelated\ncontent\n";
+        let old = reconstruct_old_from_patch(patch);
+        let after = apply_unified_patch(Some(&old), patch).unwrap();
+        assert_eq!(after, reconstruct_new_from_patch(patch));
+        assert_ne!(after, target_before);
     }
 }

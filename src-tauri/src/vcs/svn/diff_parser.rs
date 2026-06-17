@@ -4,7 +4,7 @@ use crate::{
 };
 
 /// Parse `svn diff -c REV` unified diff output into file changes.
-pub fn parse_unified_diff(diff: &str) -> Result<Vec<FileChange>> {
+pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileChange>> {
     let mut files = Vec::new();
     let mut current_index_path: Option<String> = None;
     let mut current_patch = String::new();
@@ -18,10 +18,11 @@ pub fn parse_unified_diff(diff: &str) -> Result<Vec<FileChange>> {
                  old: &mut Option<String>,
                  new: &mut Option<String>,
                  binary: &mut bool| {
+        let norm = |p: &str| normalize_svn_path(p, wc_root);
         if *binary {
             if let Some(path) = index_path.take().or_else(|| new.clone()).or_else(|| old.clone()) {
                 files.push(FileChange {
-                    path: normalize_svn_path(&path),
+                    path: norm(&path),
                     target_path: None,
                     kind: FileChangeKind::Binary,
                     old_path: None,
@@ -36,14 +37,14 @@ pub fn parse_unified_diff(diff: &str) -> Result<Vec<FileChange>> {
             .or_else(|| old.clone())
             .or_else(|| index_path.clone())
         {
-            let path = normalize_svn_path(&path);
-            let kind = infer_kind(old.as_deref(), new.as_deref(), patch);
+            let path = norm(&path);
+            let kind = infer_kind(old.as_deref(), new.as_deref(), patch, wc_root);
             let patch_body = if patch.is_empty() { None } else { Some(patch.clone()) };
             files.push(FileChange {
                 path: path.clone(),
                 target_path: None,
                 kind,
-                old_path: old.as_ref().map(|p| normalize_svn_path(p)),
+                old_path: old.as_ref().map(|p| norm(p)),
                 before: None,
                 after: None,
                 patch: patch_body,
@@ -121,16 +122,35 @@ fn parse_diff_path_line(line: &str, prefix: &str) -> String {
     path.to_string()
 }
 
-fn normalize_svn_path(path: &str) -> String {
-    let p = path.trim();
+fn normalize_svn_path(path: &str, wc_root: Option<&str>) -> String {
+    let p = path.trim().replace('\\', "/");
+    if let Some(root) = wc_root.filter(|r| !r.trim().is_empty()) {
+        let root_norm = root.trim().replace('\\', "/").trim_end_matches('/').to_lowercase();
+        let p_cmp = p.to_lowercase();
+        if p_cmp.starts_with(&root_norm)
+            && p_cmp.as_bytes().get(root_norm.len()).is_none_or(|b| *b == b'/')
+        {
+            let suffix = p[root_norm.len()..].trim_start_matches('/');
+            return if suffix.is_empty() {
+                "/".into()
+            } else {
+                format!("/{suffix}")
+            };
+        }
+    }
     if p.starts_with('/') {
-        p.to_string()
+        p
     } else {
         format!("/{p}")
     }
 }
 
-fn infer_kind(old: Option<&str>, new: Option<&str>, patch: &str) -> FileChangeKind {
+fn infer_kind(
+    old: Option<&str>,
+    new: Option<&str>,
+    patch: &str,
+    wc_root: Option<&str>,
+) -> FileChangeKind {
     if let Some(hunk) = patch.lines().find(|l| l.starts_with("@@")) {
         if hunk.contains("-0,0") || hunk.starts_with("@@ -0,") {
             return FileChangeKind::Add;
@@ -140,8 +160,8 @@ fn infer_kind(old: Option<&str>, new: Option<&str>, patch: &str) -> FileChangeKi
         }
     }
 
-    let old_norm = old.map(normalize_svn_path);
-    let new_norm = new.map(|p| normalize_svn_path(p));
+    let old_norm = old.map(|p| normalize_svn_path(p, wc_root));
+    let new_norm = new.map(|p| normalize_svn_path(p, wc_root));
     if let (Some(o), Some(n)) = (old_norm.as_deref(), new_norm.as_deref()) {
         if o != n {
             return FileChangeKind::Rename;
@@ -165,7 +185,7 @@ mod tests {
 
     #[test]
     fn parses_modify_diff() {
-        let files = parse_unified_diff(&fixture("diff_modify.txt")).unwrap();
+        let files = parse_unified_diff(&fixture("diff_modify.txt"), None).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "/trunk/README.md");
         assert_eq!(files[0].kind, FileChangeKind::Modify);
@@ -174,7 +194,7 @@ mod tests {
 
     #[test]
     fn parses_add_and_delete() {
-        let files = parse_unified_diff(&fixture("diff_add_delete.txt")).unwrap();
+        let files = parse_unified_diff(&fixture("diff_add_delete.txt"), None).unwrap();
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].path, "/trunk/new-file.txt");
         assert_eq!(files[0].kind, FileChangeKind::Add);
@@ -184,7 +204,7 @@ mod tests {
 
     #[test]
     fn parses_binary_diff() {
-        let files = parse_unified_diff(&fixture("diff_binary.txt")).unwrap();
+        let files = parse_unified_diff(&fixture("diff_binary.txt"), None).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "/trunk/assets/logo.png");
         assert_eq!(files[0].kind, FileChangeKind::Binary);
@@ -193,6 +213,19 @@ mod tests {
 
     #[test]
     fn empty_diff_returns_empty_vec() {
-        assert!(parse_unified_diff("").unwrap().is_empty());
+        assert!(parse_unified_diff("", None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn strips_working_copy_root_from_windows_paths() {
+        let diff = "Index: C:/wc/project/src/main.rs\n\
+--- C:/wc/project/src/main.rs\t(revision 1)\n\
++++ C:/wc/project/src/main.rs\t(revision 2)\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n";
+        let files = parse_unified_diff(diff, Some("C:\\wc\\project")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/src/main.rs");
     }
 }
