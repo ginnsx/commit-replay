@@ -66,6 +66,15 @@ pub fn parse_log_xml(xml: &str) -> Result<Vec<ReplayUnitMeta>> {
     Ok(entries)
 }
 
+/// Drop the first `offset` log entries (newest-first order).
+pub fn slice_log_entries(
+    entries: Vec<ReplayUnitMeta>,
+    offset: usize,
+    limit: usize,
+) -> Vec<ReplayUnitMeta> {
+    entries.into_iter().skip(offset).take(limit).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

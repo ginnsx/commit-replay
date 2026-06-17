@@ -92,10 +92,11 @@ pub fn derive_after(
 }
 
 fn apply_patch_or_lines(before: Option<&str>, patch: &str) -> Result<String> {
-    match super::patch_apply::apply_unified_patch(before, patch) {
-        Ok(text) => Ok(text),
-        Err(_) => Ok(super::patch_apply::extract_added_lines(patch)),
+    if let Ok(text) = super::patch_apply::apply_unified_patch(before, patch) {
+        return Ok(text);
     }
+    let old = super::patch_apply::reconstruct_old_from_patch(patch);
+    super::patch_apply::apply_unified_patch(Some(&old), patch)
 }
 
 #[cfg(test)]

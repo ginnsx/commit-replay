@@ -1,6 +1,7 @@
 use crate::{error::{AppError, Result}, model::FileChange};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathMapping {
     pub from: String,
     pub to: String,

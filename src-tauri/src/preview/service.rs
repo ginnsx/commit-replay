@@ -16,8 +16,7 @@ pub struct MappingInput {
 }
 
 pub fn build_preview_plan(
-    source_vcs: &str,
-    source_url: &str,
+    source_wc_path: &str,
     source_refs: &[String],
     target_wc_path: &str,
     mappings: &[MappingInput],
@@ -41,17 +40,10 @@ pub fn build_preview_plan(
             .collect(),
     );
 
-    let reader = match source_vcs {
-        "svn" => SvnReader {
-            url: source_url.to_string(),
-            username,
-            password,
-        },
-        other => {
-            return Err(AppError::Vcs(format!(
-                "unsupported source VCS: {other}"
-            )));
-        }
+    let reader = SvnReader {
+        wc_path: source_wc_path.to_string(),
+        username,
+        password,
     };
 
     let mut units = Vec::with_capacity(source_refs.len());
@@ -73,6 +65,83 @@ pub fn build_preview_plan(
         aggregated,
         stats,
     })
+}
+
+pub fn build_preview_plan_parallel(
+    source_wc_path: &str,
+    source_refs: &[String],
+    target_wc_path: &str,
+    mappings: &[MappingInput],
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<PreviewResult> {
+    use rayon::prelude::*;
+
+    if source_refs.is_empty() {
+        return Err(AppError::Vcs("no source revisions selected".into()));
+    }
+    if target_wc_path.trim().is_empty() {
+        return Err(AppError::Vcs("target working copy path is empty".into()));
+    }
+
+    let mapper = Mapper::new(
+        mappings
+            .iter()
+            .map(|m| PathMapping {
+                from: m.from.clone(),
+                to: m.to.clone(),
+            })
+            .collect(),
+    );
+
+    let reader = SvnReader {
+        wc_path: source_wc_path.to_string(),
+        username: username.clone(),
+        password: password.clone(),
+    };
+
+    let mut units: Vec<PreviewUnit> = source_refs
+        .par_iter()
+        .map(|source_ref| {
+            let mut changeset = reader.load_changeset(source_ref)?;
+            mapper.apply_to_files(&mut changeset.files)?;
+            enrich_files(target_wc_path, &mut changeset.files)?;
+            Ok(PreviewUnit {
+                meta: changeset.meta,
+                files: changeset.files,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    units.sort_by(|a, b| a.meta.source_ref.cmp(&b.meta.source_ref));
+
+    let aggregated = aggregate_by_target_path(&units);
+    let stats = compute_stats(&aggregated);
+
+    Ok(PreviewResult {
+        units,
+        aggregated,
+        stats,
+    })
+}
+
+pub fn get_aggregated_files(
+    source_wc_path: &str,
+    source_refs: &[String],
+    target_wc_path: &str,
+    mappings: &[MappingInput],
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<Vec<FileChange>> {
+    let preview = build_preview_plan_parallel(
+        source_wc_path,
+        source_refs,
+        target_wc_path,
+        mappings,
+        username,
+        password,
+    )?;
+    Ok(preview.aggregated)
 }
 
 fn enrich_files(wc_root: &str, files: &mut [FileChange]) -> Result<()> {

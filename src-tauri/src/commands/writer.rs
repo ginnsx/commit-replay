@@ -1,35 +1,60 @@
-use crate::{error::AppError, model::ValidationResult};
+use std::process::Command;
 
-/// Apply and commit a single replay unit. Emits `unit-status` events.
+use tauri::State;
+
+use crate::error::AppError;
+use crate::store::db::{list_editors, DbState};
+
 #[tauri::command]
-pub fn apply_unit(
-    source_ref: String,
-    target_vcs: String,
-    target_wc_path: String,
-    target_branch: String,
-    message_template: String,
-) -> Result<String, AppError> {
-    // TODO(M3): prepare → apply → validate → commit; on fail → rollback + emit event
-    let _ = (source_ref, target_vcs, target_wc_path, target_branch, message_template);
-    Ok(String::new())
+pub fn open_file_in_editor(
+    state: State<DbState>,
+    editor_id: String,
+    file_path: String,
+) -> Result<(), AppError> {
+    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let editors = list_editors(&conn)?;
+    let editor = editors
+        .iter()
+        .find(|e| e.id == editor_id)
+        .ok_or_else(|| AppError::Validation("editor not found".into()))?;
+
+    let path = std::path::Path::new(&file_path);
+    if !path.exists() {
+        return Err(AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("file not found: {file_path}"),
+        )));
+    }
+
+    let status = match editor.kind.as_str() {
+        "explorer" => Command::new(&editor.exe)
+            .arg("/select,")
+            .arg(&file_path)
+            .status(),
+        "gitbash" => Command::new(&editor.exe)
+            .args(["-c", &format!("start '' '{file_path}'")])
+            .status(),
+        "terminal" => Command::new(&editor.exe)
+            .args(["-d", std::path::Path::new(&file_path).parent().unwrap_or(path).to_str().unwrap_or(".")])
+            .status(),
+        _ => Command::new(&editor.exe).arg(&file_path).status(),
+    }
+    .map_err(|e| AppError::Io(e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(AppError::Other(anyhow::anyhow!(
+            "failed to open editor {}",
+            editor.name
+        )))
+    }
 }
 
-/// Re-validate the working copy after manual resolution, then commit.
 #[tauri::command]
-pub fn commit_resolved(
-    source_ref: String,
-    target_wc_path: String,
-    message_template: String,
-) -> Result<ValidationResult, AppError> {
-    // TODO(M4): validate → if passed commit → return result
-    let _ = (source_ref, target_wc_path, message_template);
-    Ok(ValidationResult { passed: false, issues: vec![] })
-}
-
-/// Open a file in the system default application.
-#[tauri::command]
-pub fn open_file_in_system(path: String) -> Result<(), AppError> {
-    // TODO(M4): use tauri-plugin-opener or shell::open
-    let _ = path;
-    Ok(())
+pub fn open_file_in_system(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| AppError::Io(std::io::Error::other(e.to_string())))
 }
