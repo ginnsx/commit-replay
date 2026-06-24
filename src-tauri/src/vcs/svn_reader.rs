@@ -5,9 +5,8 @@ use crate::{
 
 use super::VcsReader;
 use super::svn::{
-    parse_log_xml, parse_svn_revision, parse_unified_diff, svn_cat_file, svn_diff_revision,
-    svn_log_revision_xml, svn_log_xml_paged,
-    SvnCredentials,
+    parse_log_xml, parse_svn_revision, parse_unified_diff, probe_svn_wc, svn_cat_file,
+    svn_diff_revision, svn_log_revision_xml, svn_log_xml_paged, SvnCredentials,
 };
 
 #[derive(Clone)]
@@ -25,8 +24,14 @@ impl SvnReader {
         }
     }
 
+    /// Repository URL for log queries (HEAD range). WC path limits log to BASE.
+    fn repo_url(&self) -> Result<String> {
+        probe_svn_wc(&self.wc_path).map(|info| info.url)
+    }
+
     fn meta_for_revision(&self, revision: u64) -> Result<ReplayUnitMeta> {
-        let xml = svn_log_revision_xml(&self.wc_path, &self.creds(), revision)?;
+        let url = self.repo_url()?;
+        let xml = svn_log_revision_xml(&url, &self.creds(), revision)?;
         let entries = parse_log_xml(&xml)?;
         entries.into_iter().next().ok_or_else(|| {
             AppError::Vcs(format!("no log entry for revision {revision}"))
@@ -38,7 +43,8 @@ impl SvnReader {
         limit: usize,
         before_revision: Option<u64>,
     ) -> Result<Vec<ReplayUnitMeta>> {
-        svn_log_xml_paged(&self.wc_path, &self.creds(), limit, before_revision)
+        let url = self.repo_url()?;
+        svn_log_xml_paged(&url, &self.creds(), limit, before_revision)
     }
 }
 

@@ -70,6 +70,7 @@ pub fn svn_log_xml(url: &str, creds: &SvnCredentials, limit: usize) -> Result<St
 
 /// Paginated log: return up to `limit` entries older than `before_revision` (exclusive).
 /// `before_revision = None` fetches from HEAD.
+/// Pass the repository URL (from `svn info`), not a working-copy path — WC paths default to BASE:1.
 pub fn svn_log_xml_paged(
     url: &str,
     creds: &SvnCredentials,
