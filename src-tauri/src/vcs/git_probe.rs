@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use serde::Serialize;
 
 use crate::error::{AppError, Result};
@@ -12,7 +10,7 @@ pub struct GitRepoInfo {
 }
 
 fn run_git(repo_path: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = crate::process::command("git")
         .current_dir(repo_path)
         .args(args)
         .output()

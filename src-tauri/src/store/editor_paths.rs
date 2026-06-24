@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub fn resolve_editor_exe(kind: &str, exe: &str) -> String {
     let trimmed = exe.trim();
@@ -18,7 +17,7 @@ pub fn resolve_editor_exe(kind: &str, exe: &str) -> String {
 }
 
 fn resolve_in_path(name: &str) -> Option<PathBuf> {
-    let output = Command::new("where").arg(name).output().ok()?;
+    let output = crate::process::command("where").arg(name).output().ok()?;
     if !output.status.success() {
         return None;
     }

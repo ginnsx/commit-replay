@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod diff;
 pub mod error;
+pub mod process;
 pub mod mapper;
 pub mod model;
 pub mod preview;
