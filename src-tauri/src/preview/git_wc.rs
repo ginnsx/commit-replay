@@ -1,6 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
 use crate::error::{AppError, Result};
 use crate::model::{ConflictRisk, FileChange, FileChangeKind};
 
@@ -46,7 +44,7 @@ fn run_git_apply_check(wc_root: &str, target_path: &str, patch_body: &str) -> Re
     );
     let full_patch = format!("{header}{patch_body}");
 
-    let mut child = Command::new("git")
+    let mut child = crate::process::command("git")
         .current_dir(wc_root)
         .args(["apply", "--check", "-"])
         .stdin(Stdio::piped())

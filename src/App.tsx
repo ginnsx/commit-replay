@@ -554,6 +554,12 @@ export default function App() {
     setCustomMapping(false);
   };
 
+  const startNewMigration = () => {
+    resetMigration();
+    setShowRepos(false);
+    setHistoryDetailId(null);
+  };
+
   const footerHint = () => {
     if (showRepos) {
       if (settingsTab === "repos") return `${repos.length} 个已保存仓库`;
@@ -835,7 +841,7 @@ export default function App() {
                   >
                     查看本次记录
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={resetMigration}>
+                  <button type="button" className="btn btn-primary" onClick={startNewMigration}>
                     开始新的迁移
                   </button>
                 </div>
@@ -910,7 +916,7 @@ export default function App() {
         />
         <div className="main-area">
           {renderStep()}
-          {!migrated && (
+          {(!migrated || showRepos) && (
             <BottomBar
               left={footerHint()}
               showBack={!showRepos && step !== "source"}
@@ -924,9 +930,20 @@ export default function App() {
               }
               primaryAction={
                 showRepos ? (
-                  <button type="button" className="btn btn-primary" onClick={() => setShowRepos(false)}>
-                    返回迁移
-                  </button>
+                  migrated ? (
+                    <>
+                      <button type="button" className="btn btn-ghost" onClick={() => setShowRepos(false)}>
+                        返回
+                      </button>
+                      <button type="button" className="btn btn-primary" onClick={startNewMigration}>
+                        开始新的迁移
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={() => setShowRepos(false)}>
+                      返回迁移
+                    </button>
+                  )
                 ) : step === "migrate" ? (
                   <button
                     type="button"

@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use crate::{
     error::{AppError, Result},
@@ -19,7 +19,7 @@ pub struct GitWriter {
 
 impl GitWriter {
     fn run_git(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new("git")
+        let output = crate::process::command("git")
             .current_dir(&self.repo_path)
             .args(args)
             .output()
@@ -65,7 +65,7 @@ impl GitWriter {
             target = target.trim_start_matches("./")
         );
         let full_patch = format!("{header}{patch}");
-        let mut child = Command::new("git")
+        let mut child = crate::process::command("git")
             .current_dir(&self.repo_path)
             .args(["apply", "-"])
             .stdin(Stdio::piped())

@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use crate::{
     error::{AppError, Result},
     model::{ChangeSet, ReplayUnitMeta},
@@ -20,7 +18,7 @@ pub struct GitReader {
 
 impl GitReader {
     fn run_git(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new("git")
+        let output = crate::process::command("git")
             .current_dir(&self.repo_path)
             .args(args)
             .output()

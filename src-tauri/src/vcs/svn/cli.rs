@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use crate::error::{AppError, Result};
 
 use super::log_parser::parse_log_xml;
@@ -28,7 +26,7 @@ fn decode_svn_output(bytes: &[u8]) -> String {
 
 /// Run an SVN subcommand and return stdout on success.
 pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<String> {
-    let mut cmd = Command::new("svn");
+    let mut cmd = crate::process::command("svn");
     // --non-interactive: do not prompt; fail if credentials are missing.
     // Avoid --no-auth-prompt: not supported on older SVN builds (e.g. some Windows installs).
     cmd.arg("--non-interactive");
@@ -134,7 +132,7 @@ mod tests {
 
     #[test]
     fn run_svn_fails_when_svn_missing() {
-        let result = Command::new("svn_nonexistent_binary_42").output();
+        let result = crate::process::command("svn_nonexistent_binary_42").output();
         assert!(result.is_err());
     }
 
