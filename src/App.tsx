@@ -93,6 +93,8 @@ export default function App() {
 
   const [integrationPlan, setIntegrationPlan] = useState<IntegrationPlanResult | null>(null);
   const [migrationMode, setMigrationMode] = useState<MigrationMode>("incremental_first");
+  const [squashCommits, setSquashCommits] = useState(false);
+  const [squashCommitMessage, setSquashCommitMessage] = useState("");
   const [activeConflictId, setActiveConflictId] = useState<string | null>(null);
   const [acceptedReviewIds, setAcceptedReviewIds] = useState<Set<string>>(new Set());
   const [resolvedBlockedIds, setResolvedBlockedIds] = useState<Set<string>>(new Set());
@@ -128,7 +130,10 @@ export default function App() {
   const target = repos.find((r) => r.id === targetId);
   const selectedEditor = editors.find((e) => e.id === selectedEditorId);
 
-  const canExecuteMigration = pendingReview.length === 0 && pendingBlocked.length === 0;
+  const canExecuteMigration =
+    pendingReview.length === 0 &&
+    pendingBlocked.length === 0 &&
+    (!squashCommits || squashCommitMessage.trim().length > 0);
 
   const sourceRefs = useMemo(() => {
     if (step !== "preview" && step !== "migrate") return [];
@@ -454,6 +459,8 @@ export default function App() {
         migrationMode,
         [...acceptedReviewIds],
         [...resolvedBlockedIds],
+        squashCommits,
+        squashCommitMessage.trim(),
       );
       setLastMigrationId(result.migrationId);
       setMigrated(true);
@@ -552,6 +559,8 @@ export default function App() {
     setLastMigrationId(null);
     setPathMappings([]);
     setCustomMapping(false);
+    setSquashCommits(false);
+    setSquashCommitMessage("");
   };
 
   const startNewMigration = () => {
@@ -867,6 +876,10 @@ export default function App() {
                 items={integrationPlan.items}
                 migrationMode={migrationMode}
                 onMigrationModeChange={handleMigrationModeChange}
+                squashCommits={squashCommits}
+                onSquashCommitsChange={setSquashCommits}
+                squashCommitMessage={squashCommitMessage}
+                onSquashCommitMessageChange={setSquashCommitMessage}
                 autoOkCount={integrationPlan.autoOkCount}
                 reviewCount={integrationPlan.reviewCount}
                 blockedCount={integrationPlan.blockedCount}

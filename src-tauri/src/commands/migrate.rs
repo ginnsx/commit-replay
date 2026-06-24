@@ -91,6 +91,8 @@ struct MigrationWork {
     migration_mode: MigrationMode,
     accepted_review: Vec<String>,
     resolved_blocked: Vec<String>,
+    squash_commits: bool,
+    squash_commit_message: Option<String>,
 }
 
 struct MigrationOutput {
@@ -108,7 +110,22 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         migration_mode,
         accepted_review,
         resolved_blocked,
+        squash_commits,
+        squash_commit_message,
     } = work;
+
+    let squash_message = if squash_commits {
+        let msg = squash_commit_message
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::Validation("合并为单次提交时需填写 commit message".into())
+            })?;
+        Some(msg.to_string())
+    } else {
+        None
+    };
 
     ensure_different_repos(&source, &target)?;
 
@@ -152,8 +169,16 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
                 unit.meta.source_ref, apply.failed_paths
             )));
         }
-        let _ = writer.commit(&unit.meta, "relay: {message}")?;
-        commits_applied += 1;
+        if !squash_commits {
+            let _ = writer.commit(&unit.meta, "relay: {message}")?;
+            commits_applied += 1;
+        }
+    }
+
+    if squash_commits {
+        let msg = squash_message.as_deref().expect("validated above");
+        let _ = writer.commit_with_message(msg)?;
+        commits_applied = 1;
     }
 
     let files: Vec<crate::store::models::FileChangeView> = preview
@@ -226,6 +251,8 @@ pub async fn execute_migration(
     migration_mode: Option<MigrationMode>,
     accepted_review: Option<Vec<String>>,
     resolved_blocked: Option<Vec<String>>,
+    squash_commits: Option<bool>,
+    squash_commit_message: Option<String>,
 ) -> Result<MigrationResult, AppError> {
     let work = {
         let conn = state
@@ -245,6 +272,8 @@ pub async fn execute_migration(
             migration_mode: migration_mode.unwrap_or(MigrationMode::IncrementalFirst),
             accepted_review: accepted_review.unwrap_or_default(),
             resolved_blocked: resolved_blocked.unwrap_or_default(),
+            squash_commits: squash_commits.unwrap_or(false),
+            squash_commit_message,
         }
     };
 
