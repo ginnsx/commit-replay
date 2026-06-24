@@ -267,6 +267,8 @@ export async function executeMigration(
   migrationMode: MigrationMode = "incremental_first",
   acceptedReview: string[] = [],
   resolvedBlocked: string[] = [],
+  squashCommits = false,
+  squashCommitMessage?: string,
 ): Promise<MigrationResult> {
   const r = await invoke<Record<string, unknown>>("execute_migration", {
     sourceId,
@@ -277,6 +279,8 @@ export async function executeMigration(
     migrationMode,
     acceptedReview,
     resolvedBlocked,
+    squashCommits,
+    squashCommitMessage: squashCommits ? squashCommitMessage : undefined,
   });
   return {
     migrationId: String(r.migration_id),

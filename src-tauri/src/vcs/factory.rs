@@ -101,6 +101,13 @@ impl MigrationWriter {
         }
     }
 
+    pub fn commit_with_message(&self, message: &str) -> Result<String> {
+        match self {
+            MigrationWriter::Git(w) => w.commit_with_message(message),
+            MigrationWriter::Svn(w) => w.commit_with_message(message),
+        }
+    }
+
     pub fn rollback(&self, checkpoint: &str) -> Result<()> {
         match self {
             MigrationWriter::Git(w) => w.rollback(checkpoint),

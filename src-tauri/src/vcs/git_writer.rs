@@ -219,6 +219,13 @@ impl GitWriter {
             })
         }
     }
+
+    pub fn commit_with_message(&self, message: &str) -> Result<String> {
+        self.run_git(&["add", "-A"])?;
+        self.run_git(&["commit", "-m", message])?;
+        let sha = self.run_git(&["rev-parse", "--short", "HEAD"])?;
+        Ok(sha.trim().to_string())
+    }
 }
 
 impl VcsWriter for GitWriter {
@@ -286,15 +293,12 @@ impl VcsWriter for GitWriter {
     }
 
     fn commit(&self, meta: &ReplayUnitMeta, message_template: &str) -> Result<String> {
-        self.run_git(&["add", "-A"])?;
         let msg = if message_template.is_empty() {
             format!("relay: {}", meta.message)
         } else {
             message_template.replace("{message}", &meta.message)
         };
-        self.run_git(&["commit", "-m", &msg])?;
-        let sha = self.run_git(&["rev-parse", "--short", "HEAD"])?;
-        Ok(sha.trim().to_string())
+        self.commit_with_message(&msg)
     }
 
     fn rollback(&self, checkpoint: &str) -> Result<()> {

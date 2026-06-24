@@ -1002,6 +1002,24 @@
       padding: 6px 10px;
       font-size: 13px;
     }
+    .integration-squash-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    .integration-squash-message {
+      flex: 1;
+      min-width: 200px;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      padding: 6px 10px;
+      font-size: 13px;
+    }
     .integration-badge {
       font-size: 10px;
       font-weight: 600;

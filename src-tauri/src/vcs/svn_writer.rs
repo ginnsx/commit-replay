@@ -195,6 +195,11 @@ impl SvnWriter {
             })
         }
     }
+
+    pub fn commit_with_message(&self, message: &str) -> Result<String> {
+        let output = self.run_svn(&["commit", "-m", message])?;
+        parse_commit_revision(&output)
+    }
 }
 
 impl VcsWriter for SvnWriter {
@@ -274,8 +279,7 @@ impl VcsWriter for SvnWriter {
         } else {
             message_template.replace("{message}", &meta.message)
         };
-        let output = self.run_svn(&["commit", "-m", &msg])?;
-        parse_commit_revision(&output)
+        self.commit_with_message(&msg)
     }
 
     fn rollback(&self, checkpoint: &str) -> Result<()> {

@@ -234,6 +234,10 @@ export function ConflictWorkspace({
   items,
   migrationMode,
   onMigrationModeChange,
+  squashCommits,
+  onSquashCommitsChange,
+  squashCommitMessage,
+  onSquashCommitMessageChange,
   autoOkCount,
   reviewCount,
   blockedCount,
@@ -255,6 +259,10 @@ export function ConflictWorkspace({
   items: IntegrationItemView[];
   migrationMode: MigrationMode;
   onMigrationModeChange: (mode: MigrationMode) => void;
+  squashCommits: boolean;
+  onSquashCommitsChange: (value: boolean) => void;
+  squashCommitMessage: string;
+  onSquashCommitMessageChange: (value: string) => void;
   autoOkCount: number;
   reviewCount: number;
   blockedCount: number;
@@ -302,6 +310,23 @@ export function ConflictWorkspace({
               </option>
             ))}
           </select>
+          <label className="integration-squash-toggle">
+            <input
+              type="checkbox"
+              checked={squashCommits}
+              onChange={(e) => onSquashCommitsChange(e.target.checked)}
+            />
+            合并为单次提交
+          </label>
+          {squashCommits && (
+            <input
+              type="text"
+              className="integration-squash-message"
+              placeholder="commit message"
+              value={squashCommitMessage}
+              onChange={(e) => onSquashCommitMessageChange(e.target.value)}
+            />
+          )}
           {pendingReview > 0 && (
             <button type="button" className="btn btn-ghost" onClick={onAcceptAllReview}>
               全部接受需确认项
