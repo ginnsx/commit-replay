@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AppErrorPayload,
   Editor,
-  FileChangeView,
   IntegrationItemView,
   IntegrationPlanResult,
   MigrationMode,
@@ -21,7 +20,6 @@ import {
   deleteRepo,
   executeMigration,
   getDefaultEditorId,
-  getFileDiff,
   getRepoPairMappings,
   listEditors,
   listMigrations,
@@ -87,9 +85,6 @@ export default function App() {
   const [previewMeta, setPreviewMeta] = useState<PreviewMetaResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
-  const [activeFile, setActiveFile] = useState<FileChangeView | null>(null);
-  const fileDiffCacheRef = useRef(new Map<string, FileChangeView>());
-  const fileDiffScopeRef = useRef("");
 
   const [integrationPlan, setIntegrationPlan] = useState<IntegrationPlanResult | null>(null);
   const [migrationMode, setMigrationMode] = useState<MigrationMode>("incremental_first");
@@ -277,9 +272,16 @@ export default function App() {
     [source, sourceId, targetId, pathMappings, persistPairMappings],
   );
 
+  const activePreviewFile = useMemo(() => {
+    if (!activeFileId || !previewMeta) return null;
+    return previewMeta.files.find((f) => f.id === activeFileId) ?? null;
+  }, [activeFileId, previewMeta]);
+
   const loadPreview = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
     setPreviewLoading(true);
+    setPreviewMeta(null);
+    setActiveFileId(null);
     try {
       await validateMigrationCombo(sourceId, targetId);
       const meta = await buildPreviewMeta(sourceId, targetId, sourceRefs, activeMappings);
@@ -295,49 +297,11 @@ export default function App() {
     }
   }, [sourceId, targetId, sourceRefs, activeMappings]);
 
-  const previewDiffScope = useMemo(() => {
-    if (!sourceId || !targetId) return "";
-    return `${sourceId}|${targetId}|${sourceRefs.join("\0")}|${JSON.stringify(activeMappings)}`;
-  }, [sourceId, targetId, sourceRefs, activeMappings]);
-
-  useEffect(() => {
-    if (previewDiffScope !== fileDiffScopeRef.current) {
-      fileDiffCacheRef.current.clear();
-      fileDiffScopeRef.current = previewDiffScope;
-    }
-  }, [previewDiffScope]);
-
   useEffect(() => {
     if (step === "preview" && sourceId && targetId) {
       loadPreview();
     }
   }, [step, sourceId, targetId, loadPreview]);
-
-  useEffect(() => {
-    if (!activeFileId || !sourceId || !targetId || sourceRefs.length === 0) {
-      setActiveFile(null);
-      return undefined;
-    }
-
-    const cached = fileDiffCacheRef.current.get(activeFileId);
-    if (cached) {
-      setActiveFile(cached);
-      return undefined;
-    }
-
-    let cancelled = false;
-    getFileDiff(sourceId, targetId, sourceRefs, activeFileId, activeMappings)
-      .then((file) => {
-        if (cancelled) return;
-        fileDiffCacheRef.current.set(activeFileId, file);
-        setActiveFile(file);
-      })
-      .catch((e: AppErrorPayload) => setToast(<span>{e.message}</span>));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeFileId, sourceId, targetId, sourceRefs, activeMappings, previewDiffScope]);
 
   const loadIntegrationPlan = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
@@ -720,37 +684,45 @@ export default function App() {
           <div className="main-header">
             <div>
               <h1>变更预览</h1>
-              <p>{selectedCommits.size} 条提交 · 以文件为单位查看增删改</p>
+              <p>{selectedCommits.size} 条提交 · 合并后净变更</p>
             </div>
           </div>
           <div className="main-content">
-            {previewLoading ? (
-              <div className="empty-state"><p>生成预览中…</p></div>
-            ) : (
-              <>
-                <div className="summary-bar">
-                  <div className="summary-stat">
-                    <span className="badge badge-add">新增</span> <strong>{previewMeta?.adds ?? 0}</strong> 个文件
-                  </div>
-                  <div className="summary-stat">
-                    <span className="badge badge-mod">修改</span> <strong>{previewMeta?.mods ?? 0}</strong> 个文件
-                  </div>
-                  <div className="summary-stat">
-                    <span className="badge badge-del">删除</span> <strong>{previewMeta?.dels ?? 0}</strong> 个文件
-                  </div>
-                  <div className="summary-stat" style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
-                    +{previewMeta?.totalAdditions ?? 0} / −{previewMeta?.totalDeletions ?? 0} 行
-                  </div>
+            <div className="summary-bar">
+              <div className="summary-stat">
+                <span className="badge badge-add">新增</span>{" "}
+                <strong>{previewLoading ? "…" : (previewMeta?.adds ?? 0)}</strong> 个文件
+              </div>
+              <div className="summary-stat">
+                <span className="badge badge-mod">修改</span>{" "}
+                <strong>{previewLoading ? "…" : (previewMeta?.mods ?? 0)}</strong> 个文件
+              </div>
+              <div className="summary-stat">
+                <span className="badge badge-del">删除</span>{" "}
+                <strong>{previewLoading ? "…" : (previewMeta?.dels ?? 0)}</strong> 个文件
+              </div>
+              <div className="summary-stat" style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
+                {previewLoading
+                  ? "分析中…"
+                  : `+${previewMeta?.totalAdditions ?? 0} / −${previewMeta?.totalDeletions ?? 0} 行`}
+              </div>
+            </div>
+            <div className="preview-layout">
+              {previewLoading ? (
+                <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
+                  <p>正在分析合并后的变更…</p>
                 </div>
-                <div className="preview-layout">
+              ) : files.length === 0 ? (
+                <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
+                  <p>所选提交合并后无净变更</p>
+                </div>
+              ) : (
+                <>
                   <FileTree files={files} activeId={activeFileId} onSelect={setActiveFileId} />
-                  <DiffView
-                    file={activeFile?.id === activeFileId ? activeFile : null}
-                    loading={!!activeFileId && activeFile?.id !== activeFileId}
-                  />
-                </div>
-              </>
-            )}
+                  <DiffView file={activePreviewFile} />
+                </>
+              )}
+            </div>
           </div>
         </div>
       );

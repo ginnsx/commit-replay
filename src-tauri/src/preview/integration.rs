@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use crate::{
-    diff::line_diff::{find_overlap_lines, lines_to_diff},
+    diff::line_diff::{find_overlap_lines, lines_to_diff, patch_to_diff_lines},
     model::{FileChange, FileChangeKind},
     preview::patch_apply::{reconstruct_new_from_patch, reconstruct_old_from_patch},
     preview::target_wc::{check_apply, TargetWcKind},
     relay::file_kind_to_status,
     store::models::{
-        IntegrationItemView, IntegrationPlanResult, IntegrationStatus, IntegrationStrategy,
-        MigrationMode,
+        DiffLineType, IntegrationItemView, IntegrationPlanResult, IntegrationStatus,
+        IntegrationStrategy, MigrationMode,
     },
 };
 
@@ -25,14 +25,6 @@ fn to_lines(text: Option<&str>) -> Vec<String> {
         .lines()
         .map(str::to_string)
         .collect()
-}
-
-fn lines_to_text(lines: &[String]) -> Option<String> {
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n"))
-    }
 }
 
 fn patch_applies_cleanly(target_kind: TargetWcKind, wc_root: &str, fc: &FileChange) -> bool {
@@ -54,6 +46,9 @@ fn line_match_ratio(a: &str, b: &str) -> f32 {
 }
 
 fn target_has_expected_content(fc: &FileChange) -> bool {
+    if fc.conflict_risk == Some(crate::model::ConflictRisk::High) {
+        return false;
+    }
     if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
         return true;
     }
@@ -104,6 +99,18 @@ fn has_meaningful_overlap(
     false
 }
 
+fn integration_diff_lines(fc: &FileChange) -> Vec<crate::store::models::DiffLine> {
+    let lines = if let Some(patch) = fc.patch.as_deref() {
+        patch_to_diff_lines(patch)
+    } else {
+        lines_to_diff(fc.before.as_deref(), fc.after.as_deref())
+    };
+    lines
+        .into_iter()
+        .filter(|l| !matches!(l.line_type, DiffLineType::Ctx))
+        .collect()
+}
+
 pub fn build_integration_plan(
     files: &[FileChange],
     target_wc_path: &str,
@@ -129,10 +136,7 @@ pub fn build_integration_plan(
         }
         let before_lines = to_lines(fc.before.as_deref());
         let after_lines = to_lines(fc.after.as_deref());
-        let diff = lines_to_diff(
-            lines_to_text(&before_lines).as_deref(),
-            lines_to_text(&after_lines).as_deref(),
-        );
+        let diff = integration_diff_lines(fc);
         items.push(IntegrationItemView {
             id: path.clone(),
             path,
@@ -234,7 +238,15 @@ fn classify_modify(
     target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> (IntegrationStatus, IntegrationStrategy, String) {
-    let patch_ok = patch_applies_cleanly(target_kind, target_wc_path, fc);
+    if fc.conflict_risk == Some(crate::model::ConflictRisk::High) {
+        return (
+            IntegrationStatus::Blocked,
+            IntegrationStrategy::ManualMerge,
+            "目标与源补丁上下文不一致，需人工合并".into(),
+        );
+    }
+    let patch_ok = fc.patch.is_some()
+        && patch_applies_cleanly(target_kind, target_wc_path, fc);
     let source_before = fc
         .patch
         .as_deref()
@@ -286,6 +298,14 @@ fn classify_modify(
                     IntegrationStrategy::ApplyPatch,
                     "补丁可干净应用".into(),
                 )
+            } else if fc.patch.is_none()
+                && !content_equal(fc.before.as_deref(), fc.after.as_deref())
+            {
+                (
+                    IntegrationStatus::AutoOk,
+                    IntegrationStrategy::WriteAfter,
+                    "已合并所选提交的净变更".into(),
+                )
             } else if target_matches_source_before {
                 (
                     IntegrationStatus::Review,
@@ -327,6 +347,30 @@ mod tests {
             patch: Some(patch.into()),
             conflict_risk: None,
         }
+    }
+
+    #[test]
+    fn blocked_when_conflict_risk_high() {
+        let fc = FileChange {
+            path: "/trunk/a.html".into(),
+            target_path: Some("a.html".into()),
+            kind: FileChangeKind::Modify,
+            old_path: None,
+            before: Some("target\n".into()),
+            after: Some("target\n".into()),
+            source_after: None,
+            source_ref: None,
+            patch: Some("@@ -1,1 +1,1 @@\n-old\n+new\n".into()),
+            conflict_risk: Some(crate::model::ConflictRisk::High),
+        };
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+        assert_eq!(plan.items[0].integration_status, IntegrationStatus::Blocked);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::ManualMerge);
     }
 
     #[test]

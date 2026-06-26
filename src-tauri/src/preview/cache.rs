@@ -8,6 +8,9 @@ use crate::model::FileChange;
 
 use super::MappingInput;
 
+/// Bump when merge/preview aggregation logic changes to invalidate stale cache entries.
+const PREVIEW_AGGREGATE_VERSION: u64 = 2;
+
 pub struct PreviewCache(Mutex<Option<CachedPreview>>);
 
 struct CachedPreview {
@@ -22,6 +25,7 @@ pub fn preview_cache_key(
     mappings: &[MappingInput],
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
+    PREVIEW_AGGREGATE_VERSION.hash(&mut hasher);
     source_id.hash(&mut hasher);
     target_id.hash(&mut hasher);
     for r in source_refs {
