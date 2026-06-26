@@ -11,8 +11,8 @@ use crate::{
     },
 
     preview::patch_apply::{
-        apply_unified_patch, merge_patches_last_wins, reconstruct_new_from_patch,
-        reconstruct_old_from_patch,
+        apply_unified_patch, merge_patches_last_wins,
+        reconstruct_new_from_patch, reconstruct_old_from_patch, resolve_target_after,
     },
 
     preview::target_wc::{enrich_files, TargetWcKind},
@@ -196,12 +196,13 @@ pub fn build_preview_plan(
 
     }
 
-
+    sort_units_chronological(&mut units);
+    let ordered_refs = chronological_source_refs(&units);
 
     let aggregated = aggregate_merged_by_target_path(
         &units,
         &ctx.target_wc_path,
-        source_refs,
+        &ordered_refs,
         &ctx.reader,
     )?;
 
@@ -303,12 +304,13 @@ pub fn build_preview_plan_parallel(
 
 
 
-    sort_units_by_source_refs(&mut units, source_refs);
+    sort_units_chronological(&mut units);
+    let ordered_refs = chronological_source_refs(&units);
 
     let aggregated = aggregate_merged_by_target_path(
         &units,
         &target_wc_path,
-        source_refs,
+        &ordered_refs,
         &reader,
     )?;
 
@@ -376,14 +378,15 @@ pub fn load_preview_units(ctx: &PreviewContext, source_refs: &[String]) -> Resul
         })
         .collect::<Result<Vec<_>>>()?;
 
-    sort_units_by_source_refs(&mut units, source_refs);
+    sort_units_chronological(&mut units);
 
     Ok(units)
 }
 
 pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
     let units = load_preview_units(ctx, source_refs)?;
-    aggregate_merged_by_target_path(&units, &ctx.target_wc_path, source_refs, &ctx.reader)
+    let ordered_refs = chronological_source_refs(&units);
+    aggregate_merged_by_target_path(&units, &ctx.target_wc_path, &ordered_refs, &ctx.reader)
 }
 
 pub fn get_merged_file_change(
@@ -400,11 +403,12 @@ pub fn get_merged_file_change(
         .target_path
         .clone()
         .unwrap_or_else(|| file_path.to_string());
+    let ordered_refs = chronological_source_refs(&units);
     merge_file_changes_for_preview(
         &target_path,
         &changes,
         &ctx.target_wc_path,
-        source_refs,
+        &ordered_refs,
         Some(&ctx.reader),
     )?
     .ok_or_else(|| AppError::Vcs(format!("file not found in preview: {file_path}")))
@@ -412,13 +416,21 @@ pub fn get_merged_file_change(
 
 
 
-fn sort_units_by_source_refs(units: &mut [PreviewUnit], source_refs: &[String]) {
-    units.sort_by_key(|u| {
-        source_refs
-            .iter()
-            .position(|r| r == &u.meta.source_ref)
-            .unwrap_or(usize::MAX)
-    });
+fn unit_chrono_key(u: &PreviewUnit) -> u64 {
+    if let Ok(rev) = parse_svn_revision(&u.meta.source_ref) {
+        return rev;
+    }
+    chrono::DateTime::parse_from_rfc3339(&u.meta.date)
+        .map(|d| d.timestamp().max(0) as u64)
+        .unwrap_or(0)
+}
+
+fn sort_units_chronological(units: &mut [PreviewUnit]) {
+    units.sort_by_key(unit_chrono_key);
+}
+
+fn chronological_source_refs(units: &[PreviewUnit]) -> Vec<String> {
+    units.iter().map(|u| u.meta.source_ref.clone()).collect()
 }
 
 fn changes_for_target_path(units: &[PreviewUnit], file_path: &str) -> Vec<FileChange> {
@@ -493,8 +505,7 @@ fn change_chrono_key(fc: &FileChange, source_refs: &[String]) -> u64 {
     if let Ok(rev) = parse_svn_revision(sr) {
         return rev;
     }
-    let pos = source_refs.iter().position(|r| r == sr).unwrap_or(0);
-    u64::MAX - pos as u64
+    source_refs.iter().position(|r| r == sr).unwrap_or(0) as u64
 }
 
 fn sort_changes_chronological(changes: &mut [FileChange], source_refs: &[String]) {
@@ -558,16 +569,16 @@ fn merge_file_changes_for_preview(
         }));
     }
 
-    let mut disk = wc_before.clone();
+    let mut target_merged = wc_before.clone();
     let mut merge_context_ok = true;
     for fc in &ordered {
         match fc.kind {
-            FileChangeKind::Delete => disk = None,
+            FileChangeKind::Delete => target_merged = None,
             FileChangeKind::Binary => {
                 if let Some(patch) = fc.patch.as_deref() {
-                    let prev = disk.clone();
-                    match apply_unified_patch(disk.as_deref(), patch) {
-                        Ok(next) => disk = Some(next),
+                    let prev = target_merged.clone();
+                    match apply_unified_patch(target_merged.as_deref(), patch) {
+                        Ok(next) => target_merged = Some(next),
                         Err(_) => {
                             if prev.is_some() {
                                 merge_context_ok = false;
@@ -578,20 +589,16 @@ fn merge_file_changes_for_preview(
             }
             FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
                 if let Some(patch) = fc.patch.as_deref() {
-                    let prev = disk.clone();
-                    disk = apply_merge_step(disk, patch)?;
+                    let prev = target_merged.clone();
+                    target_merged = apply_merge_step(target_merged, patch)?;
                     let old = reconstruct_old_from_patch(patch);
                     let new = reconstruct_new_from_patch(patch);
-                    if old != new && content_equal(disk.as_deref(), prev.as_deref()) {
+                    if old != new && content_equal(target_merged.as_deref(), prev.as_deref()) {
                         merge_context_ok = false;
                     }
                 }
             }
         }
-    }
-
-    if !merge_context_ok {
-        disk = wc_before.clone();
     }
 
     let conflict_risk = if merge_context_ok {
@@ -606,9 +613,26 @@ fn merge_file_changes_for_preview(
         merge_patches_for_display(&ordered)
     };
 
-    let kind = infer_net_kind(wc_before.is_some(), disk.is_some());
+    let patch_list: Vec<&str> = ordered
+        .iter()
+        .filter_map(|fc| fc.patch.as_deref())
+        .collect();
+    let after_content = if merge_context_ok {
+        target_merged.clone()
+    } else if let Some(before) = wc_before.as_deref() {
+        resolve_target_after(
+            before,
+            display_patch.as_deref(),
+            &patch_list,
+        )
+        .or(target_merged.clone())
+    } else {
+        target_merged.clone()
+    };
+
+    let kind = infer_net_kind(wc_before.is_some(), after_content.is_some());
     let visible = if merge_context_ok {
-        has_net_change(&kind, wc_before.as_deref(), disk.as_deref())
+        has_net_change(&kind, wc_before.as_deref(), after_content.as_deref())
     } else {
         display_patch.is_some()
     };
@@ -623,7 +647,7 @@ fn merge_file_changes_for_preview(
         kind,
         old_path: first.old_path.clone(),
         before: wc_before,
-        after: disk,
+        after: after_content,
         source_after: None,
         source_ref: None,
         patch: display_patch,

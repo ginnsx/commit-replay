@@ -93,7 +93,7 @@ pub fn derive_after(
 fn apply_patch_or_lines(
     before: Option<&str>,
     patch: &str,
-    source_after: Option<&str>,
+    _source_after: Option<&str>,
 ) -> Result<String> {
     let expected_new = super::patch_apply::reconstruct_new_from_patch(patch);
     let old = super::patch_apply::reconstruct_old_from_patch(patch);
@@ -104,10 +104,17 @@ fn apply_patch_or_lines(
     if before.is_some_and(|b| normalize_lines(b) == normalize_lines(&old)) {
         return super::patch_apply::apply_unified_patch(before, patch);
     }
-    if let Some(content) = source_after {
-        return Ok(content.to_string());
+    if let Ok(next) = super::patch_apply::apply_unified_patch(before, patch) {
+        return Ok(next);
     }
-    Ok(expected_new)
+    if let Some(b) = before {
+        if let Ok(next) = super::patch_apply::apply_unified_patch_by_search(b, patch) {
+            if normalize_lines(&next) != normalize_lines(b) {
+                return Ok(next);
+            }
+        }
+    }
+    Ok(before.map(str::to_string).unwrap_or(expected_new))
 }
 
 fn normalize_lines(s: &str) -> String {
@@ -125,9 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_after_uses_source_after_when_baseline_differs() {
-        use crate::preview::patch_apply::reconstruct_new_from_patch;
-
+    fn derive_after_keeps_target_when_patch_context_mismatches() {
         let patch = "@@ -381,8 +381,7 @@\n \
              \t\t\t\"    ii.brand AS brand, \\n\" +\n \
              -\"    pb.bin as bin,\\n\" +\n \
@@ -135,17 +140,14 @@ mod tests {
              +\"    pb.bin as binTwo,\\n\" +\n \
              \t\t\t\"    ii.OC_OR_SCREEN_TYPE AS ocOrScreenType  \\n\" +\n";
         let git_before = "line380\n    private Integer inventoryItemId;\n    private String itemCode;\n";
-        let svn_after = "line380\n    \"    pb.bin as binTwo,\\n\" +\n";
         let after = derive_after(
             Some(git_before),
             Some(patch),
             &FileChangeKind::Modify,
-            Some(svn_after),
+            Some("unrelated full svn snapshot\n"),
         )
         .unwrap()
         .unwrap();
-        assert_eq!(after, svn_after);
-        assert_ne!(after, reconstruct_new_from_patch(patch));
-        assert!(!after.contains("inventoryItemId"));
+        assert_eq!(after, git_before);
     }
 }
