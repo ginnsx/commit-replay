@@ -14,6 +14,7 @@
     "test:integration": "cd src-tauri && cargo test --test svn_integration -- --ignored",
     "test:regression:smoke": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite smoke",
     "test:regression:safety": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite production-safety",
+    "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
