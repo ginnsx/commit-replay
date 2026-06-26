@@ -2,6 +2,8 @@
 
 copy-diff 采用分层测试：**解析器单元测试（必跑）**、**集成测试（可选）**、**前端组件测试（必跑）**。
 
+业务级黑盒验收测试集见 [`docs/black_box_test_suite.md`](docs/black_box_test_suite.md)，用于验证跨仓库迁移不会漏文件、多文件、误写路径或错误处理冲突。自动回归方案见 [`docs/regression_automation_plan.md`](docs/regression_automation_plan.md)。
+
 ## 快速命令
 
 ```bash
@@ -11,6 +13,10 @@ cd src-tauri && cargo test
 
 # 前端监听模式
 npm run test:watch
+
+# Git -> Git 黑盒自动回归（临时仓库 + 文件哈希/提交数校验）
+npm run test:regression:smoke
+npm run test:regression:safety
 
 # 可选：对真实 SVN 仓库做集成测试（需网络与凭据）
 npm run test:integration
