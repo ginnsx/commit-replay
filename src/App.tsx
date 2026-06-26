@@ -133,11 +133,9 @@ export default function App() {
   const sourceRefs = useMemo(() => {
     if (step !== "preview" && step !== "migrate") return [];
     if (selectedCommits.size === 0) return [];
-    const refs: string[] = [];
-    for (const commit of commits) {
-      if (selectedCommits.has(commit.id)) refs.push(commit.sourceRef);
-    }
-    return refs;
+    const selected = commits.filter((c) => selectedCommits.has(c.id));
+    selected.sort((a, b) => a.date.localeCompare(b.date));
+    return selected.map((c) => c.sourceRef);
   }, [step, commits, selectedCommits]);
 
   const activeMappings = useMemo(() => {

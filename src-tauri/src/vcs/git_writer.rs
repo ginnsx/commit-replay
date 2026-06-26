@@ -221,10 +221,37 @@ impl GitWriter {
     }
 
     pub fn commit_with_message(&self, message: &str) -> Result<String> {
+        self.commit_with_message_inner(message, false)
+    }
+
+    pub fn commit_with_message_allow_empty(&self, message: &str) -> Result<String> {
+        self.commit_with_message_inner(message, true)
+    }
+
+    fn commit_with_message_inner(&self, message: &str, allow_empty: bool) -> Result<String> {
         self.run_git(&["add", "-A"])?;
-        self.run_git(&["commit", "-m", message])?;
+        let status = self.run_git(&["status", "--porcelain"])?;
+        if status.trim().is_empty() {
+            if allow_empty {
+                self.run_git(&["commit", "--allow-empty", "-m", message])?;
+            } else {
+                let sha = self.run_git(&["rev-parse", "--short", "HEAD"])?;
+                return Ok(sha.trim().to_string());
+            }
+        } else {
+            self.run_git(&["commit", "-m", message])?;
+        }
         let sha = self.run_git(&["rev-parse", "--short", "HEAD"])?;
         Ok(sha.trim().to_string())
+    }
+
+    pub fn commit_allow_empty(&self, meta: &ReplayUnitMeta, message_template: &str) -> Result<String> {
+        let msg = if message_template.is_empty() {
+            format!("relay: {}", meta.message)
+        } else {
+            message_template.replace("{message}", &meta.message)
+        };
+        self.commit_with_message_allow_empty(&msg)
     }
 }
 

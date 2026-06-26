@@ -101,6 +101,13 @@ impl MigrationWriter {
         }
     }
 
+    pub fn commit_allow_empty(&self, meta: &ReplayUnitMeta, message_template: &str) -> Result<String> {
+        match self {
+            MigrationWriter::Git(w) => w.commit_allow_empty(meta, message_template),
+            MigrationWriter::Svn(w) => w.commit(meta, message_template),
+        }
+    }
+
     pub fn commit_with_message(&self, message: &str) -> Result<String> {
         match self {
             MigrationWriter::Git(w) => w.commit_with_message(message),

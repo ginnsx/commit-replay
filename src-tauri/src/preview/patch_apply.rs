@@ -199,6 +199,232 @@ fn apply_hunk(lines: &mut Vec<String>, hunk: &Hunk) -> Result<()> {
     Ok(())
 }
 
+fn find_subsequence(haystack: &[String], needle: &[String]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn hunk_old_side_pattern(hunk: &Hunk) -> Vec<String> {
+    hunk.lines
+        .iter()
+        .filter_map(|hl| match hl {
+            HunkLine::Context(s) | HunkLine::Remove(s) => Some(s.clone()),
+            HunkLine::Add(_) => None,
+        })
+        .collect()
+}
+
+fn hunk_remove_only_pattern(hunk: &Hunk) -> Vec<String> {
+    hunk.lines
+        .iter()
+        .filter_map(|hl| match hl {
+            HunkLine::Remove(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn hunk_new_side_lines(hunk: &Hunk) -> Vec<String> {
+    hunk.lines
+        .iter()
+        .filter_map(|hl| match hl {
+            HunkLine::Context(s) | HunkLine::Add(s) => Some(s.clone()),
+            HunkLine::Remove(_) => None,
+        })
+        .collect()
+}
+
+fn compress_line(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace() && *c != '"' && *c != '+' && *c != '\\')
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn find_line_exact(lines: &[String], needle: &str) -> Option<usize> {
+    lines.iter().position(|l| l == needle)
+}
+
+fn find_line_trim(lines: &[String], needle: &str) -> Option<usize> {
+    let n = needle.trim();
+    lines.iter().position(|l| l.trim() == n)
+}
+
+fn find_line_loose(lines: &[String], needle: &str) -> Option<usize> {
+    let n = compress_line(needle);
+    if n.len() < 8 {
+        return None;
+    }
+    lines.iter().position(|l| {
+        let t = compress_line(l);
+        t == n || (n.len() > 16 && t.contains(&n)) || (t.len() > 16 && n.contains(&t))
+    })
+}
+
+fn find_line_fuzzy(lines: &[String], needle: &str) -> Option<usize> {
+    find_line_exact(lines, needle)
+        .or_else(|| find_line_trim(lines, needle))
+        .or_else(|| find_line_loose(lines, needle))
+}
+
+pub fn diagnose_patch_against_base(patch: &str, base: &str) -> (usize, usize, usize) {
+    let lines: Vec<String> = base.lines().map(String::from).collect();
+    let mut total = 0usize;
+    let mut matched = 0usize;
+    for hunk in parse_hunks(patch).unwrap_or_default() {
+        for hl in &hunk.lines {
+            if let HunkLine::Remove(old) = hl {
+                total += 1;
+                if find_line_fuzzy(&lines, old).is_some() {
+                    matched += 1;
+                }
+            }
+        }
+    }
+    (total, matched, total.saturating_sub(matched))
+}
+
+fn apply_hunk_by_line_pairs(lines: &mut Vec<String>, hunk: &Hunk) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < hunk.lines.len() {
+        match &hunk.lines[i] {
+            HunkLine::Remove(old) => {
+                if let Some(pos) = find_line_fuzzy(lines, old) {
+                    if i + 1 < hunk.lines.len() {
+                        if let HunkLine::Add(new) = &hunk.lines[i + 1] {
+                            lines[pos] = new.clone();
+                            i += 2;
+                            changed = true;
+                            continue;
+                        }
+                    }
+                    lines.remove(pos);
+                    changed = true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn find_subsequence_loose(haystack: &[String], needle: &[String]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack.windows(needle.len()).position(|window| {
+        window.iter().zip(needle.iter()).all(|(a, b)| {
+            let ca = compress_line(a);
+            let cb = compress_line(b);
+            ca == cb || (cb.len() > 16 && ca.contains(&cb)) || (ca.len() > 16 && cb.contains(&ca))
+        })
+    })
+}
+
+fn apply_hunk_by_search(lines: &mut Vec<String>, hunk: &Hunk) -> Result<()> {
+    if hunk.old_count == 0 {
+        for hl in &hunk.lines {
+            if let HunkLine::Add(s) = hl {
+                lines.push(s.clone());
+            }
+        }
+        return Ok(());
+    }
+
+    let full_pattern = hunk_old_side_pattern(hunk);
+    let pos = find_subsequence(lines, &full_pattern)
+        .or_else(|| find_subsequence_loose(lines, &full_pattern))
+        .or_else(|| {
+            let removes = hunk_remove_only_pattern(hunk);
+            if removes.is_empty() {
+                None
+            } else {
+                find_subsequence(lines, &removes)
+                    .or_else(|| find_subsequence_loose(lines, &removes))
+            }
+        });
+
+    let Some(start) = pos else {
+        return Err(AppError::Vcs("hunk old side not found in target".into()));
+    };
+
+    let matched_len = if find_subsequence(&lines[start..], &full_pattern).is_some() {
+        full_pattern.len()
+    } else {
+        hunk_remove_only_pattern(hunk).len()
+    };
+
+    let replacement = hunk_new_side_lines(hunk);
+    lines.splice(start..start + matched_len, replacement);
+    Ok(())
+}
+
+/// Apply patches in order; each step tries strict then search-based apply.
+pub fn apply_patches_sequential(base: &str, patches: &[&str]) -> Option<String> {
+    let mut current = base.to_string();
+    let mut any = false;
+    for patch in patches {
+        let Some(next) = apply_unified_patch(Some(&current), patch)
+            .or_else(|_| apply_unified_patch_by_search(&current, patch))
+            .ok()
+        else {
+            continue;
+        };
+        if next != current {
+            any = true;
+            current = next;
+        }
+    }
+    if any {
+        Some(current)
+    } else {
+        None
+    }
+}
+
+/// Best-effort target `after` from optional merged patch and/or per-commit patches.
+pub fn resolve_target_after(
+    before: &str,
+    merged_patch: Option<&str>,
+    sequential_patches: &[&str],
+) -> Option<String> {
+    if !sequential_patches.is_empty() {
+        if let Some(next) = apply_patches_sequential(before, sequential_patches) {
+            return Some(next);
+        }
+    }
+    let patch = merged_patch?;
+    apply_unified_patch(Some(before), patch)
+        .or_else(|_| apply_unified_patch_by_search(before, patch))
+        .ok()
+        .filter(|next| next != before)
+}
+
+/// Apply patch by searching for hunk old-side content in `base` (cross-version / line drift).
+pub fn apply_unified_patch_by_search(base: &str, patch: &str) -> Result<String> {
+    let mut lines: Vec<String> = base.lines().map(String::from).collect();
+    let hunks = parse_hunks(patch)?;
+    let mut any = false;
+    for hunk in hunks {
+        if apply_hunk_by_search(&mut lines, &hunk).is_ok() {
+            any = true;
+        } else if apply_hunk_by_line_pairs(&mut lines, &hunk) {
+            any = true;
+        }
+    }
+    if any {
+        Ok(lines.join("\n"))
+    } else {
+        Err(AppError::Vcs("no hunk applied to target".into()))
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RawHunk {
     header: String,
@@ -349,6 +575,28 @@ mod tests {
         let patch = "@@ -3,1 +3,1 @@\n-line3\n+new line\n";
         let out = apply_unified_patch(Some(base), patch).unwrap();
         assert_eq!(out, "line1\nline2\nnew line");
+    }
+
+    #[test]
+    fn apply_by_search_finds_remove_line_at_different_offset() {
+        let old_line = "                                          ng-model=\"formParams.description\" style=\"height: 50px\">";
+        let new_line = "                                          ng-model=\"formParams.description\" rows=\"5\">";
+        let base = format!("<div>\n<textarea\n{old_line}\n</textarea>\n</div>\n");
+        let patch = format!("@@ -3,1 +3,1 @@\n-{old_line}\n+{new_line}\n");
+        let out = apply_unified_patch_by_search(&base, &patch).unwrap();
+        assert!(out.contains("rows=\"5\""));
+        assert!(!out.contains("style=\"height: 50px\""));
+    }
+
+    #[test]
+    fn apply_patches_sequential_cross_version() {
+        let old_line = "                                          ng-model=\"formParams.description\" style=\"height: 50px\">";
+        let new_line = "                                          ng-model=\"formParams.description\" rows=\"5\">";
+        let base = format!("<div>\n<textarea\n{old_line}\n</textarea>\n</div>\n");
+        let p1 = format!("@@ -3,1 +3,1 @@\n-{old_line}\n+{new_line}\n");
+        let out = apply_patches_sequential(&base, &[&p1]).unwrap();
+        assert!(out.contains("rows=\"5\""));
+        assert!(!out.contains("style=\"height: 50px\""));
     }
 
     #[test]

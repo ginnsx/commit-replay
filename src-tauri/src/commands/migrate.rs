@@ -2,7 +2,10 @@ use tauri::State;
 
 use crate::{
     error::AppError,
-    preview::{build_integration_plan, build_preview_plan_parallel, strategy_map, MappingInput, PreviewContext},
+    preview::{
+        build_integration_plan, build_preview_plan_parallel, patch_apply::resolve_target_after,
+        strategy_map, MappingInput, PreviewContext,
+    },
     relay::preview_file_with_diff,
     store::{
         db::{decrypt_repo_pass, get_repo, repo_path_mappings, save_migration, DbState},
@@ -50,16 +53,79 @@ fn validate_integration_plan(
     Ok(())
 }
 
-fn unit_strategy(
+fn unit_apply_strategy(
+    path: &str,
     aggregated: IntegrationStrategy,
-    _unit_is_last_for_path: bool,
+    resolved_blocked: &[String],
+    squash_commits: bool,
 ) -> IntegrationStrategy {
-    match aggregated {
-        IntegrationStrategy::Skip => IntegrationStrategy::Skip,
-        IntegrationStrategy::ManualMerge => IntegrationStrategy::ManualMerge,
-        IntegrationStrategy::WriteAfter => IntegrationStrategy::WriteAfter,
-        IntegrationStrategy::ApplyPatch => IntegrationStrategy::ApplyPatch,
+    let eff = effective_strategy(path, aggregated, resolved_blocked);
+    if eff == IntegrationStrategy::WriteAfter && resolved_blocked.iter().any(|id| id == path) {
+        return IntegrationStrategy::Skip;
     }
+    if squash_commits && eff == IntegrationStrategy::WriteAfter {
+        IntegrationStrategy::Skip
+    } else {
+        eff
+    }
+}
+
+fn prepare_finalize_file(
+    fc: &crate::model::FileChange,
+    resolved_blocked: &[String],
+    units: &[crate::model::PreviewUnit],
+) -> Option<crate::model::FileChange> {
+    let tp = fc.target_path.as_deref()?;
+    let mut out = fc.clone();
+    if resolved_blocked.iter().any(|id| id == tp) {
+        let before = out.before.as_deref().unwrap_or("");
+        let patches: Vec<&str> = units
+            .iter()
+            .flat_map(|u| u.files.iter())
+            .filter(|f| f.target_path.as_deref() == Some(tp))
+            .filter_map(|f| f.patch.as_deref())
+            .collect();
+        if let Some(after) =
+            resolve_target_after(before, out.patch.as_deref(), &patches)
+        {
+            out.after = Some(after);
+        }
+    }
+    if content_equal(out.before.as_deref(), out.after.as_deref()) {
+        return None;
+    }
+    Some(out)
+}
+
+fn should_finalize_path(
+    path: &str,
+    strategy: IntegrationStrategy,
+    resolved_blocked: &[String],
+    squash_commits: bool,
+) -> bool {
+    if effective_strategy(path, strategy, resolved_blocked) != IntegrationStrategy::WriteAfter {
+        return false;
+    }
+    squash_commits || resolved_blocked.iter().any(|id| id == path)
+}
+
+fn effective_strategy(
+    path: &str,
+    strategy: IntegrationStrategy,
+    resolved_blocked: &[String],
+) -> IntegrationStrategy {
+    if strategy == IntegrationStrategy::ManualMerge
+        && resolved_blocked.iter().any(|id| id == path)
+    {
+        IntegrationStrategy::WriteAfter
+    } else {
+        strategy
+    }
+}
+
+fn content_equal(a: Option<&str>, b: Option<&str>) -> bool {
+    let norm = |s: &str| s.replace("\r\n", "\n").replace('\r', "\n");
+    norm(a.unwrap_or("")) == norm(b.unwrap_or(""))
 }
 
 fn preview_context(
@@ -152,7 +218,10 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             .filter_map(|fc| {
                 let tp = fc.target_path.as_deref()?;
                 let agg = strategies.get(tp).copied()?;
-                Some((tp.to_string(), unit_strategy(agg, true)))
+                Some((
+                    tp.to_string(),
+                    unit_apply_strategy(tp, agg, &resolved_blocked, squash_commits),
+                ))
             })
             .collect();
         let apply = writer.apply_changeset_with_strategies(
@@ -170,7 +239,53 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            let _ = writer.commit(&unit.meta, "relay: {message}")?;
+            let _ = writer.commit_allow_empty(&unit.meta, "relay: {message}")?;
+            commits_applied += 1;
+        }
+    }
+
+    let finalize_files: Vec<crate::model::FileChange> = preview
+        .aggregated
+        .iter()
+        .filter(|fc| {
+            fc.target_path.as_ref().is_some_and(|tp| {
+                strategies
+                    .get(tp)
+                    .is_some_and(|s| should_finalize_path(tp, *s, &resolved_blocked, squash_commits))
+            })
+        })
+        .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
+        .collect();
+    if !finalize_files.is_empty() {
+        let finalize_strategies: std::collections::HashMap<String, IntegrationStrategy> =
+            finalize_files
+                .iter()
+                .filter_map(|fc| {
+                    let tp = fc.target_path.as_deref()?;
+                    Some((tp.to_string(), IntegrationStrategy::WriteAfter))
+                })
+                .collect();
+        let finalize_meta = preview
+            .units
+            .last()
+            .map(|u| u.meta.clone())
+            .unwrap_or_else(|| preview.units[0].meta.clone());
+        let apply = writer.apply_changeset_with_strategies(
+            &crate::model::ChangeSet {
+                meta: finalize_meta,
+                files: finalize_files,
+            },
+            &finalize_strategies,
+        )?;
+        if apply.status != crate::model::ApplyStatus::Ok {
+            let _ = writer.rollback(&checkpoint);
+            return Err(AppError::Apply(format!(
+                "failed to finalize write_after: {:?}",
+                apply.failed_paths
+            )));
+        }
+        if !squash_commits {
+            let _ = writer.commit_with_message("relay: finalized conflicts")?;
             commits_applied += 1;
         }
     }
