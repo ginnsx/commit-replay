@@ -20,6 +20,15 @@ fn content_equal(a: Option<&str>, b: Option<&str>) -> bool {
     normalize_content(a.unwrap_or("")) == normalize_content(b.unwrap_or(""))
 }
 
+fn content_equal_ignoring_final_newline(a: Option<&str>, b: Option<&str>) -> bool {
+    let norm = |s: &str| {
+        normalize_content(s)
+            .trim_end_matches('\n')
+            .to_string()
+    };
+    norm(a.unwrap_or("")) == norm(b.unwrap_or(""))
+}
+
 fn to_lines(text: Option<&str>) -> Vec<String> {
     text.unwrap_or("")
         .lines()
@@ -46,11 +55,18 @@ fn line_match_ratio(a: &str, b: &str) -> f32 {
 }
 
 fn target_has_expected_content(fc: &FileChange) -> bool {
+    if let Some(patch) = fc.patch.as_deref() {
+        let expected = reconstruct_new_from_patch(patch);
+        if !expected.is_empty()
+            && content_equal_ignoring_final_newline(fc.before.as_deref(), Some(&expected))
+        {
+            return true;
+        }
+    } else if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
+        return true;
+    }
     if fc.conflict_risk == Some(crate::model::ConflictRisk::High) {
         return false;
-    }
-    if content_equal(fc.before.as_deref(), fc.after.as_deref()) {
-        return true;
     }
     let Some(patch) = fc.patch.as_deref() else {
         return false;
