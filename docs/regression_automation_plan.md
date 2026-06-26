@@ -331,6 +331,7 @@ svn status $target
 ```powershell
 npm run test:regression:smoke
 npm run test:regression:safety
+npm run test:regression:release
 ```
 
 产物写入：
@@ -354,6 +355,7 @@ artifacts/regression/<run_id>/cases/<case_id>/after/manifest.json
 {
   "test:regression:smoke": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite smoke",
   "test:regression:safety": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite production-safety",
+  "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release",
   "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release"
 }
 ```

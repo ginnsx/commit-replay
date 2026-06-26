@@ -17,6 +17,7 @@ npm run test:watch
 # Git -> Git 黑盒自动回归（临时仓库 + 文件哈希/提交数校验）
 npm run test:regression:smoke
 npm run test:regression:safety
+npm run test:regression:release
 
 # 可选：对真实 SVN 仓库做集成测试（需网络与凭据）
 npm run test:integration

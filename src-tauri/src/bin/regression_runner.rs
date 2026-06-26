@@ -33,6 +33,7 @@ const README: &str = "relay regression target\n";
 enum Suite {
     Smoke,
     ProductionSafety,
+    Release,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,7 @@ enum TargetSetup {
     Dirty,
     OccupiedNewFile,
     FailingCommitHook,
+    AlreadyHasModify,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +151,7 @@ impl Config {
                     suite = match value.as_str() {
                         "smoke" => Suite::Smoke,
                         "production-safety" | "safety" => Suite::ProductionSafety,
+                        "release" => Suite::Release,
                         other => {
                             eprintln!("unknown suite {other}, using production-safety");
                             Suite::ProductionSafety
@@ -233,8 +236,9 @@ fn run_case(run_dir: &Path, case: &CaseSpec) -> AppResult<CaseResult> {
     fs::create_dir_all(&work)?;
 
     let refs = create_source_repo(&source)?;
-    let baseline = create_target_repo(&target)?;
+    create_target_repo(&target)?;
     apply_target_setup(&target, case.target_setup)?;
+    let baseline = git(&target, &["rev-parse", "HEAD"])?.trim().to_string();
 
     write_json(&case_dir.join("refs.json"), &refs)?;
     fs::write(case_dir.join("target_baseline_ref.txt"), &baseline)?;
@@ -657,6 +661,10 @@ fn apply_target_setup(target: &Path, setup: TargetSetup) -> AppResult<()> {
             let hook = target.join(".git").join("hooks").join("pre-commit");
             fs::write(hook, "#!/bin/sh\nexit 1\n")?;
         }
+        TargetSetup::AlreadyHasModify => {
+            write_file(target, "src/existing.txt", MOD_EXISTING)?;
+            commit(target, "target already has expected modify")?;
+        }
     }
     Ok(())
 }
@@ -825,6 +833,14 @@ fn cases_for_suite(suite: Suite) -> Vec<CaseSpec> {
     ];
     if matches!(suite, Suite::Smoke) {
         cases.retain(|c| matches!(c.id, "I01-GG" | "I03-GG" | "I04-GG"));
+    } else if matches!(suite, Suite::Release) {
+        cases.extend([
+            case_d01(),
+            case_d03(),
+            case_f05(),
+            case_e07(),
+            case_f10(),
+        ]);
     }
     cases
 }
@@ -975,6 +991,92 @@ fn case_i08() -> CaseSpec {
     }
 }
 
+fn case_d01() -> CaseSpec {
+    CaseSpec {
+        id: "D01-GG",
+        commits: vec!["C01-add-text"],
+        mappings: default_mapping(),
+        target_setup: TargetSetup::Clean,
+        expect: Expectation::Success {
+            changed: changed(&[("src/new_file.txt", NEW_FILE)]),
+            deleted: vec![],
+            absent: vec![],
+            unchanged: vec!["README.md", "src/target_only.txt"],
+            commit_count: 1,
+        },
+        accept_review: false,
+    }
+}
+
+fn case_d03() -> CaseSpec {
+    CaseSpec {
+        id: "D03-GG",
+        commits: vec!["C03-delete-text"],
+        mappings: default_mapping(),
+        target_setup: TargetSetup::Clean,
+        expect: Expectation::Success {
+            changed: BTreeMap::new(),
+            deleted: vec!["src/delete_me.txt"],
+            absent: vec![],
+            unchanged: vec!["README.md", "src/target_only.txt"],
+            commit_count: 1,
+        },
+        accept_review: true,
+    }
+}
+
+fn case_f05() -> CaseSpec {
+    CaseSpec {
+        id: "F05-GG",
+        commits: vec!["C01-add-text", "C02-modify-text", "C03-delete-text"],
+        mappings: default_mapping(),
+        target_setup: TargetSetup::Clean,
+        expect: Expectation::Success {
+            changed: changed(&[
+                ("src/new_file.txt", NEW_FILE),
+                ("src/existing.txt", MOD_EXISTING),
+            ]),
+            deleted: vec!["src/delete_me.txt"],
+            absent: vec![],
+            unchanged: vec!["README.md", "src/target_only.txt"],
+            commit_count: 3,
+        },
+        accept_review: true,
+    }
+}
+
+fn case_e07() -> CaseSpec {
+    CaseSpec {
+        id: "E07-GG",
+        commits: vec!["C03-delete-text"],
+        mappings: default_mapping(),
+        target_setup: TargetSetup::Clean,
+        expect: Expectation::Failure {
+            phase: "execute",
+            contains: "review",
+            target_unchanged: true,
+        },
+        accept_review: false,
+    }
+}
+
+fn case_f10() -> CaseSpec {
+    CaseSpec {
+        id: "F10-GG",
+        commits: vec!["C02-modify-text"],
+        mappings: default_mapping(),
+        target_setup: TargetSetup::AlreadyHasModify,
+        expect: Expectation::Success {
+            changed: BTreeMap::new(),
+            deleted: vec![],
+            absent: vec![],
+            unchanged: vec!["README.md", "src/target_only.txt", "src/existing.txt"],
+            commit_count: 1,
+        },
+        accept_review: false,
+    }
+}
+
 fn case_to_json(case: &CaseSpec) -> serde_json::Value {
     serde_json::json!({
         "id": case.id,
@@ -1048,6 +1150,7 @@ fn suite_name(suite: Suite) -> &'static str {
     match suite {
         Suite::Smoke => "smoke",
         Suite::ProductionSafety => "production-safety",
+        Suite::Release => "release",
     }
 }
 
