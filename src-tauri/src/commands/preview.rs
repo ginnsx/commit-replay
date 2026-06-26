@@ -8,15 +8,14 @@ use crate::{
 
     preview::{
 
-        build_integration_plan, build_preview_plan_parallel, enrich_file,
-
-        get_aggregated_files_meta, preview_cache_key, MappingInput, PreviewCache, PreviewContext,
+        build_integration_plan, build_preview_plan_meta, build_preview_plan_parallel, enrich_file,
+        get_merged_file_change, preview_cache_key, MappingInput, PreviewCache, PreviewContext,
 
         TargetWcKind,
 
     },
 
-    relay::{preview_file_meta, preview_file_with_diff},
+    relay::{preview_file_with_diff},
 
     store::{
 
@@ -132,75 +131,9 @@ fn target_kind_for_context(ctx: &PreviewContext) -> TargetWcKind {
 
 
 
-fn aggregated_meta_cached(
+fn meta_from_aggregated(aggregated: Vec<crate::model::FileChange>) -> PreviewMetaResult {
 
-    state: &DbState,
-
-    cache: &PreviewCache,
-
-    source_id: &str,
-
-    target_id: &str,
-
-    source_refs: &[String],
-
-    path_mappings: Option<Vec<MappingInput>>,
-
-) -> Result<Vec<crate::model::FileChange>, AppError> {
-
-    let ctx = preview_context(state, source_id, target_id, path_mappings.clone())?;
-
-    let key = preview_cache_key(source_id, target_id, source_refs, &ctx.mappings);
-
-    if let Some(cached) = cache.get(key) {
-
-        return Ok(cached);
-
-    }
-
-    let aggregated = get_aggregated_files_meta(&ctx, source_refs)?;
-
-    cache.set(key, aggregated.clone());
-
-    Ok(aggregated)
-
-}
-
-
-
-fn build_preview_meta_sync(
-
-    state: &DbState,
-
-    cache: &PreviewCache,
-
-    source_id: &str,
-
-    target_id: &str,
-
-    source_refs: &[String],
-
-    path_mappings: Option<Vec<MappingInput>>,
-
-) -> Result<PreviewMetaResult, AppError> {
-
-    let aggregated = aggregated_meta_cached(
-
-        state,
-
-        cache,
-
-        source_id,
-
-        target_id,
-
-        source_refs,
-
-        path_mappings,
-
-    )?;
-
-    let files: Vec<FileChangeView> = aggregated.iter().map(preview_file_meta).collect();
+    let files: Vec<FileChangeView> = aggregated.iter().map(preview_file_with_diff).collect();
 
     let adds = files
 
@@ -230,7 +163,7 @@ fn build_preview_meta_sync(
 
     let total_deletions = files.iter().map(|f| f.deletions).sum();
 
-    Ok(PreviewMetaResult {
+    PreviewMetaResult {
 
         files,
 
@@ -244,29 +177,33 @@ fn build_preview_meta_sync(
 
         total_deletions,
 
-    })
+    }
 
 }
 
 
 
 #[tauri::command]
-pub fn build_preview_meta(
-    state: State<DbState>,
-    cache: State<PreviewCache>,
+pub async fn build_preview_meta(
+    state: State<'_, DbState>,
+    cache: State<'_, PreviewCache>,
     source_id: String,
     target_id: String,
     source_refs: Vec<String>,
     path_mappings: Option<Vec<MappingInput>>,
 ) -> Result<PreviewMetaResult, AppError> {
-    build_preview_meta_sync(
-        &state,
-        &cache,
-        &source_id,
-        &target_id,
-        &source_refs,
-        path_mappings,
-    )
+    let ctx = preview_context(&state, &source_id, &target_id, path_mappings.clone())?;
+    let key = preview_cache_key(&source_id, &target_id, &source_refs, &ctx.mappings);
+    if let Some(cached) = cache.get(key) {
+        return Ok(meta_from_aggregated(cached));
+    }
+
+    let aggregated = tokio::task::spawn_blocking(move || build_preview_plan_meta(&ctx, &source_refs))
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("preview meta task: {e}")))??;
+
+    cache.set(key, aggregated.clone());
+    Ok(meta_from_aggregated(aggregated))
 }
 
 
@@ -293,29 +230,9 @@ pub fn get_file_diff(
 
     let ctx = preview_context(&state, &source_id, &target_id, path_mappings.clone())?;
 
-    let mut aggregated = aggregated_meta_cached(
+    let _ = cache;
 
-        &state,
-
-        &cache,
-
-        &source_id,
-
-        &target_id,
-
-        &source_refs,
-
-        path_mappings,
-
-    )?;
-
-    let fc = aggregated
-
-        .iter_mut()
-
-        .find(|f| f.target_path.as_deref() == Some(file_path.as_str()) || f.path == file_path)
-
-        .ok_or_else(|| AppError::Vcs(format!("file not found in preview: {file_path}")))?;
+    let mut fc = get_merged_file_change(&ctx, &source_refs, &file_path)?;
 
     enrich_file(
 
@@ -323,13 +240,13 @@ pub fn get_file_diff(
 
         &ctx.target_wc_path,
 
-        fc,
+        &mut fc,
 
         &ctx.reader,
 
     )?;
 
-    Ok(preview_file_with_diff(fc))
+    Ok(preview_file_with_diff(&fc))
 
 }
 

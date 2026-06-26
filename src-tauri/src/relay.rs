@@ -1,6 +1,6 @@
 use crate::error::{AppError, Result};
 use crate::model::{FileChange, FileChangeKind};
-use crate::store::models::{DiffLine, FileChangeView, FileStatus};
+use crate::store::models::{DiffLine, DiffLineType, FileChangeView, FileStatus};
 
 use crate::diff::line_diff::{count_line_stats, count_patch_stats, lines_to_diff, patch_to_diff_lines};
 
@@ -12,6 +12,18 @@ pub fn file_kind_to_status(kind: &FileChangeKind) -> FileStatus {
     }
 }
 
+fn preview_diff_lines(fc: &FileChange) -> Vec<DiffLine> {
+    let lines = if let Some(patch) = fc.patch.as_deref() {
+        patch_to_diff_lines(patch)
+    } else {
+        lines_to_diff(fc.before.as_deref(), fc.after.as_deref())
+    };
+    lines
+        .into_iter()
+        .filter(|l| !matches!(l.line_type, DiffLineType::Ctx))
+        .collect()
+}
+
 pub fn file_change_to_view(fc: &FileChange, include_diff: bool) -> FileChangeView {
     let path = fc
         .target_path
@@ -19,18 +31,16 @@ pub fn file_change_to_view(fc: &FileChange, include_diff: bool) -> FileChangeVie
         .unwrap_or_else(|| fc.path.clone());
     let status = file_kind_to_status(&fc.kind);
     let diff = if include_diff {
-        Some(if let Some(patch) = fc.patch.as_deref() {
-            patch_to_diff_lines(patch)
-        } else {
-            lines_to_diff(fc.before.as_deref(), fc.after.as_deref())
-        })
+        Some(preview_diff_lines(fc))
     } else {
         None
     };
-    let (additions, deletions) = if let Some(patch) = fc.patch.as_deref() {
+    let (additions, deletions) = if let Some(d) = &diff {
+        count_line_stats(d)
+    } else if let Some(patch) = fc.patch.as_deref() {
         count_patch_stats(patch)
     } else {
-        diff.as_ref().map(|d| count_line_stats(d)).unwrap_or((0, 0))
+        count_line_stats(&lines_to_diff(fc.before.as_deref(), fc.after.as_deref()))
     };
     FileChangeView {
         id: path.clone(),

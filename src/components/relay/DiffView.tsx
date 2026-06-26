@@ -7,10 +7,8 @@ const DIFF_LINE_HEIGHT = 20;
 
 export function DiffView({
   file,
-  loading = false,
 }: {
   file?: FileChangeView | null;
-  loading?: boolean;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const lines = file?.diff ?? [];
@@ -26,7 +24,7 @@ export function DiffView({
     return (
       <div className="diff-panel">
         <div className="empty-state">
-          <p>{loading ? "加载变更中…" : "选择左侧文件查看变更详情"}</p>
+          <p>选择左侧文件查看变更详情</p>
         </div>
       </div>
     );
@@ -41,7 +39,7 @@ export function DiffView({
       <div ref={parentRef} className="diff-body">
         {lines.length === 0 ? (
           <div className="empty-state">
-            <p>加载中…</p>
+            <p>无行级差异</p>
           </div>
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>

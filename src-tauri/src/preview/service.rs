@@ -10,11 +10,22 @@ use crate::{
 
     },
 
+    preview::patch_apply::{
+        apply_unified_patch, merge_patches_last_wins, reconstruct_new_from_patch,
+        reconstruct_old_from_patch,
+    },
+
     preview::target_wc::{enrich_files, TargetWcKind},
 
     store::models::RepoType,
 
     vcs::factory::SourceReader,
+
+    vcs::svn::parse_svn_revision,
+
+    diff::line_diff::{count_line_stats, lines_to_diff},
+
+    preview::git_wc::{read_wc_file, resolve_wc_path},
 
 };
 
@@ -187,7 +198,12 @@ pub fn build_preview_plan(
 
 
 
-    let aggregated = aggregate_by_target_path(&units);
+    let aggregated = aggregate_merged_by_target_path(
+        &units,
+        &ctx.target_wc_path,
+        source_refs,
+        &ctx.reader,
+    )?;
 
     let stats = compute_stats(&aggregated);
 
@@ -287,11 +303,14 @@ pub fn build_preview_plan_parallel(
 
 
 
-    units.sort_by(|a, b| a.meta.source_ref.cmp(&b.meta.source_ref));
+    sort_units_by_source_refs(&mut units, source_refs);
 
-
-
-    let aggregated = aggregate_by_target_path(&units);
+    let aggregated = aggregate_merged_by_target_path(
+        &units,
+        &target_wc_path,
+        source_refs,
+        &reader,
+    )?;
 
     let stats = compute_stats(&aggregated);
 
@@ -323,7 +342,7 @@ pub fn get_aggregated_files_meta(ctx: &PreviewContext, source_refs: &[String]) -
     build_preview_plan_meta(ctx, source_refs)
 }
 
-pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+pub fn load_preview_units(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<PreviewUnit>> {
     use rayon::prelude::*;
 
     if source_refs.is_empty() {
@@ -357,38 +376,268 @@ pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> 
         })
         .collect::<Result<Vec<_>>>()?;
 
-    units.sort_by(|a, b| a.meta.source_ref.cmp(&b.meta.source_ref));
-    Ok(aggregate_by_target_path(&units))
+    sort_units_by_source_refs(&mut units, source_refs);
+
+    Ok(units)
+}
+
+pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+    let units = load_preview_units(ctx, source_refs)?;
+    aggregate_merged_by_target_path(&units, &ctx.target_wc_path, source_refs, &ctx.reader)
+}
+
+pub fn get_merged_file_change(
+    ctx: &PreviewContext,
+    source_refs: &[String],
+    file_path: &str,
+) -> Result<FileChange> {
+    let units = load_preview_units(ctx, source_refs)?;
+    let changes = changes_for_target_path(&units, file_path);
+    if changes.is_empty() {
+        return Err(AppError::Vcs(format!("file not found in preview: {file_path}")));
+    }
+    let target_path = changes[0]
+        .target_path
+        .clone()
+        .unwrap_or_else(|| file_path.to_string());
+    merge_file_changes_for_preview(
+        &target_path,
+        &changes,
+        &ctx.target_wc_path,
+        source_refs,
+        Some(&ctx.reader),
+    )?
+    .ok_or_else(|| AppError::Vcs(format!("file not found in preview: {file_path}")))
 }
 
 
 
-fn aggregate_by_target_path(units: &[PreviewUnit]) -> Vec<FileChange> {
+fn sort_units_by_source_refs(units: &mut [PreviewUnit], source_refs: &[String]) {
+    units.sort_by_key(|u| {
+        source_refs
+            .iter()
+            .position(|r| r == &u.meta.source_ref)
+            .unwrap_or(usize::MAX)
+    });
+}
 
-    let mut by_path: std::collections::BTreeMap<String, FileChange> =
-
-        std::collections::BTreeMap::new();
-
-
-
+fn changes_for_target_path(units: &[PreviewUnit], file_path: &str) -> Vec<FileChange> {
+    let mut changes = Vec::new();
     for unit in units {
-
         for f in &unit.files {
-
-            if let Some(tp) = &f.target_path {
-
-                by_path.insert(tp.clone(), f.clone());
-
+            if f.target_path.as_deref() == Some(file_path) || f.path == file_path {
+                changes.push(f.clone());
             }
-
         }
+    }
+    changes
+}
 
+fn normalize_content(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn content_equal(a: Option<&str>, b: Option<&str>) -> bool {
+    normalize_content(a.unwrap_or("")) == normalize_content(b.unwrap_or(""))
+}
+
+fn has_net_change(kind: &FileChangeKind, before: Option<&str>, after: Option<&str>) -> bool {
+    if content_equal(before, after) {
+        return false;
+    }
+    if *kind == FileChangeKind::Binary {
+        return true;
+    }
+    let (add, del) = count_line_stats(&lines_to_diff(before, after));
+    add > 0 || del > 0
+}
+
+fn collect_changes_by_path(units: &[PreviewUnit]) -> std::collections::BTreeMap<String, Vec<FileChange>> {
+    let mut by_path: std::collections::BTreeMap<String, Vec<FileChange>> =
+        std::collections::BTreeMap::new();
+    for unit in units {
+        for f in &unit.files {
+            if let Some(tp) = &f.target_path {
+                by_path.entry(tp.clone()).or_default().push(f.clone());
+            }
+        }
+    }
+    by_path
+}
+
+fn aggregate_merged_by_target_path(
+    units: &[PreviewUnit],
+    wc_root: &str,
+    source_refs: &[String],
+    reader: &SourceReader,
+) -> Result<Vec<FileChange>> {
+    collect_changes_by_path(units)
+        .into_iter()
+        .filter_map(|(target_path, changes)| {
+            merge_file_changes_for_preview(
+                &target_path,
+                &changes,
+                wc_root,
+                source_refs,
+                Some(reader),
+            )
+            .transpose()
+        })
+        .collect()
+}
+
+fn change_chrono_key(fc: &FileChange, source_refs: &[String]) -> u64 {
+    let Some(sr) = fc.source_ref.as_deref() else {
+        return 0;
+    };
+    if let Ok(rev) = parse_svn_revision(sr) {
+        return rev;
+    }
+    let pos = source_refs.iter().position(|r| r == sr).unwrap_or(0);
+    u64::MAX - pos as u64
+}
+
+fn sort_changes_chronological(changes: &mut [FileChange], source_refs: &[String]) {
+    changes.sort_by_key(|c| change_chrono_key(c, source_refs));
+}
+
+fn apply_merge_step(disk: Option<String>, patch: &str) -> Result<Option<String>> {
+    if let Ok(next) = apply_unified_patch(disk.as_deref(), patch) {
+        return Ok(Some(next));
+    }
+    if disk.is_none() {
+        let old = reconstruct_old_from_patch(patch);
+        if let Ok(next) = apply_unified_patch(Some(&old), patch) {
+            return Ok(Some(next));
+        }
+    }
+    Ok(disk)
+}
+
+fn merge_patches_for_display(changes: &[FileChange]) -> Option<String> {
+    let patches: Vec<&str> = changes
+        .iter()
+        .filter_map(|fc| fc.patch.as_deref())
+        .collect();
+    merge_patches_last_wins(&patches)
+}
+
+fn merge_file_changes_for_preview(
+    target_path: &str,
+    changes: &[FileChange],
+    wc_root: &str,
+    source_refs: &[String],
+    _reader: Option<&SourceReader>,
+) -> Result<Option<FileChange>> {
+    if changes.is_empty() {
+        return Ok(None);
     }
 
+    let mut ordered = changes.to_vec();
+    sort_changes_chronological(&mut ordered, source_refs);
 
+    let wc_path = resolve_wc_path(wc_root, target_path);
+    let wc_before = read_wc_file(&wc_path);
+    let latest = ordered.last().expect("non-empty");
 
-    by_path.into_values().collect()
+    if latest.kind == FileChangeKind::Delete {
+        if wc_before.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(FileChange {
+            path: latest.path.clone(),
+            target_path: Some(target_path.to_string()),
+            kind: FileChangeKind::Delete,
+            old_path: latest.old_path.clone(),
+            before: wc_before,
+            after: None,
+            source_after: None,
+            source_ref: None,
+            patch: None,
+            conflict_risk: Some(ConflictRisk::Low),
+        }));
+    }
 
+    let mut disk = wc_before.clone();
+    let mut merge_context_ok = true;
+    for fc in &ordered {
+        match fc.kind {
+            FileChangeKind::Delete => disk = None,
+            FileChangeKind::Binary => {
+                if let Some(patch) = fc.patch.as_deref() {
+                    let prev = disk.clone();
+                    match apply_unified_patch(disk.as_deref(), patch) {
+                        Ok(next) => disk = Some(next),
+                        Err(_) => {
+                            if prev.is_some() {
+                                merge_context_ok = false;
+                            }
+                        }
+                    }
+                }
+            }
+            FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+                if let Some(patch) = fc.patch.as_deref() {
+                    let prev = disk.clone();
+                    disk = apply_merge_step(disk, patch)?;
+                    let old = reconstruct_old_from_patch(patch);
+                    let new = reconstruct_new_from_patch(patch);
+                    if old != new && content_equal(disk.as_deref(), prev.as_deref()) {
+                        merge_context_ok = false;
+                    }
+                }
+            }
+        }
+    }
+
+    if !merge_context_ok {
+        disk = wc_before.clone();
+    }
+
+    let conflict_risk = if merge_context_ok {
+        ConflictRisk::Low
+    } else {
+        ConflictRisk::High
+    };
+
+    let display_patch = if merge_context_ok {
+        None
+    } else {
+        merge_patches_for_display(&ordered)
+    };
+
+    let kind = infer_net_kind(wc_before.is_some(), disk.is_some());
+    let visible = if merge_context_ok {
+        has_net_change(&kind, wc_before.as_deref(), disk.as_deref())
+    } else {
+        display_patch.is_some()
+    };
+    if !visible {
+        return Ok(None);
+    }
+
+    let first = &ordered[0];
+    Ok(Some(FileChange {
+        path: first.path.clone(),
+        target_path: Some(target_path.to_string()),
+        kind,
+        old_path: first.old_path.clone(),
+        before: wc_before,
+        after: disk,
+        source_after: None,
+        source_ref: None,
+        patch: display_patch,
+        conflict_risk: Some(conflict_risk),
+    }))
+}
+
+fn infer_net_kind(before_exists: bool, after_exists: bool) -> FileChangeKind {
+    match (before_exists, after_exists) {
+        (false, true) => FileChangeKind::Add,
+        (true, false) => FileChangeKind::Delete,
+        (false, false) => FileChangeKind::Delete,
+        (true, true) => FileChangeKind::Modify,
+    }
 }
 
 
@@ -439,6 +688,14 @@ fn compute_stats(files: &[FileChange]) -> DiffStats {
 
             }
 
+        } else {
+
+            let (add, del) = count_line_stats(&lines_to_diff(f.before.as_deref(), f.after.as_deref()));
+
+            lines_added += add as usize;
+
+            lines_removed += del as usize;
+
         }
 
     }
@@ -469,104 +726,143 @@ mod tests {
 
     use super::*;
 
-    use crate::model::{FileChange, FileChangeKind, ReplayUnitMeta};
-
-
-
-    fn sample_meta() -> ReplayUnitMeta {
-
-        ReplayUnitMeta {
-
-            source_ref: "svn:1".into(),
-
-            author: String::new(),
-
-            date: String::new(),
-
-            message: String::new(),
-
-            changed_paths_count: 1,
-
-        }
-
-    }
-
-
+    use crate::model::{FileChange, FileChangeKind};
 
     #[test]
-
-    fn aggregate_later_unit_overrides() {
-
-        let units = vec![
-
-            PreviewUnit {
-
-                meta: sample_meta(),
-
-                files: vec![FileChange {
-
-                    path: "/trunk/a.txt".into(),
-
-                    target_path: Some("a.txt".into()),
-
-                    kind: FileChangeKind::Modify,
-
-                    old_path: None,
-
-                    before: Some("v1".into()),
-
-                    after: Some("v2".into()),
-
-                    source_after: None,
-                    source_ref: None,
-
-                    patch: None,
-
-                    conflict_risk: None,
-
-                }],
-
-            },
-
-            PreviewUnit {
-
-                meta: sample_meta(),
-
-                files: vec![FileChange {
-
-                    path: "/trunk/a.txt".into(),
-
-                    target_path: Some("a.txt".into()),
-
-                    kind: FileChangeKind::Modify,
-
-                    old_path: None,
-
-                    before: Some("v2".into()),
-
-                    after: Some("v3".into()),
-
-                    source_after: None,
-                    source_ref: None,
-
-                    patch: None,
-
-                    conflict_risk: None,
-
-                }],
-
-            },
-
-        ];
-
-        let agg = aggregate_by_target_path(&units);
-
-        assert_eq!(agg.len(), 1);
-
-        assert_eq!(agg[0].after.as_deref(), Some("v3"));
-
+    fn apply_merge_step_does_not_replace_full_file_with_patch_fragment() {
+        let line = "                                          ng-model=\"formParams.description\" style=\"height: 50px\">";
+        let full_before = format!("<div>\n<textarea\n{line}\n</textarea>\n</div>\n");
+        let patch = format!(
+            "@@ -3,1 +3,1 @@\n-{line}\n+                                          ng-model=\"formParams.description\" rows=\"5\">\n"
+        );
+        let disk = Some(full_before);
+        let after = apply_merge_step(disk, &patch).unwrap().unwrap();
+        assert!(after.contains("<div>"));
+        assert!(after.contains("rows=\"5\""));
     }
 
+    #[test]
+    fn merge_preview_chronological_add_then_remove_style() {
+        let line = "                                          ng-model=\"formParams.description\" style=\"height: 50px\">";
+        let line_with_rows = "                                          ng-model=\"formParams.description\" rows=\"5\" style=\"height: 50px\">";
+        let line_final = "                                          ng-model=\"formParams.description\" rows=\"5\">";
+        let add_rows = format!("@@ -3,1 +3,1 @@\n-{line}\n+{line_with_rows}\n");
+        let remove_style = format!("@@ -3,1 +3,1 @@\n-{line_with_rows}\n+{line_final}\n");
+        let changes = vec![
+            FileChange {
+                path: "/trunk/a.html".into(),
+                target_path: Some("a.html".into()),
+                kind: FileChangeKind::Modify,
+                old_path: None,
+                before: None,
+                after: None,
+                source_after: None,
+                source_ref: Some("svn:50545".into()),
+                patch: Some(add_rows.into()),
+                conflict_risk: None,
+            },
+            FileChange {
+                path: "/trunk/a.html".into(),
+                target_path: Some("a.html".into()),
+                kind: FileChangeKind::Modify,
+                old_path: None,
+                before: None,
+                after: None,
+                source_after: None,
+                source_ref: Some("svn:50556".into()),
+                patch: Some(remove_style.into()),
+                conflict_risk: None,
+            },
+        ];
+        let source_refs = vec!["svn:50557".into(), "svn:50556".into(), "svn:50545".into()];
+        let wc_root = std::env::temp_dir().join(format!(
+            "copy-diff-merge-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&wc_root).unwrap();
+        let full_before = format!("<div>\n<textarea\n{line}\n</textarea>\n</div>\n");
+        std::fs::write(wc_root.join("a.html"), &full_before).unwrap();
+        let agg = merge_file_changes_for_preview(
+            "a.html",
+            &changes,
+            wc_root.to_str().unwrap(),
+            &source_refs,
+            None,
+        )
+        .unwrap()
+        .expect("net change");
+        let line = agg
+            .after
+            .as_deref()
+            .unwrap()
+            .lines()
+            .find(|l| l.contains("formParams.description"))
+            .unwrap();
+        assert!(line.contains("rows=\"5\""));
+        assert!(!line.contains("style=\"height: 50px\""));
+
+        let diff = crate::relay::preview_file_with_diff(&agg).diff.unwrap();
+        let del = diff
+            .iter()
+            .find(|l| matches!(l.line_type, crate::store::models::DiffLineType::Del))
+            .expect("deletion line");
+        let add = diff
+            .iter()
+            .find(|l| matches!(l.line_type, crate::store::models::DiffLineType::Add))
+            .expect("addition line");
+        assert!(del.text.contains("style=\"height: 50px\""));
+        assert!(add.text.contains("rows=\"5\""));
+        assert!(!add.text.contains("style=\"height: 50px\""));
+        assert_eq!(agg.patch, None);
+        assert_eq!(agg.conflict_risk, Some(ConflictRisk::Low));
+        let _ = std::fs::remove_dir_all(&wc_root);
+    }
+
+    #[test]
+    fn merge_preview_context_fail_shows_selected_patches_only() {
+        let line = "                                          ng-model=\"formParams.description\" style=\"height: 50px\">";
+        let line_final = "                                          ng-model=\"formParams.description\" rows=\"5\">";
+        // hunk targets line 3 but WC line 3 differs — context mismatch
+        let patch = format!("@@ -3,1 +3,1 @@\n-wrong line content\n+{line_final}\n");
+        let changes = vec![FileChange {
+            path: "/trunk/a.html".into(),
+            target_path: Some("a.html".into()),
+            kind: FileChangeKind::Modify,
+            old_path: None,
+            before: None,
+            after: None,
+            source_after: None,
+            source_ref: Some("svn:50556".into()),
+            patch: Some(patch),
+            conflict_risk: None,
+        }];
+        let wc_root = std::env::temp_dir().join(format!(
+            "copy-diff-ctx-fail-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&wc_root).unwrap();
+        let full_before = format!("<div>\n<textarea\n{line}\n</textarea>\n</div>\n");
+        std::fs::write(wc_root.join("a.html"), &full_before).unwrap();
+        let agg = merge_file_changes_for_preview(
+            "a.html",
+            &changes,
+            wc_root.to_str().unwrap(),
+            &["svn:50556".into()],
+            None,
+        )
+        .unwrap()
+        .expect("visible via patch");
+        assert_eq!(agg.conflict_risk, Some(ConflictRisk::High));
+        assert_eq!(agg.after.as_deref(), Some(full_before.as_str()));
+        let patch_text = agg.patch.as_deref().expect("merged patch for display");
+        assert!(patch_text.contains("rows=\"5\""));
+        assert!(!patch_text.contains("wrong line content") || patch_text.contains("+"));
+        let view = crate::relay::preview_file_with_diff(&agg);
+        let diff = view.diff.unwrap();
+        assert!(diff.iter().any(|l| l.text.contains("rows=\"5\"")));
+        assert!(diff.len() <= 4);
+        let _ = std::fs::remove_dir_all(&wc_root);
+    }
 }
 
 

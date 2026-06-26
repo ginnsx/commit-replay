@@ -43,7 +43,7 @@ fn svn_check_apply(_wc_root: &str, fc: &FileChange) -> ConflictRisk {
     }
 }
 
-fn ensure_source_after(reader: &SourceReader, fc: &mut FileChange) -> Result<()> {
+pub(crate) fn ensure_source_after(reader: &SourceReader, fc: &mut FileChange) -> Result<()> {
     if fc.source_after.is_some() {
         return Ok(());
     }
@@ -77,19 +77,23 @@ fn enrich_one(
     let wc_path = resolve_wc_path(wc_root, &target);
     fc.before = read_wc_file(&wc_path);
 
-    fc.after = derive_after(
-        fc.before.as_deref(),
-        fc.patch.as_deref(),
-        &fc.kind,
-        fc.source_after.as_deref(),
-    )?;
+    if fc.patch.is_some() || fc.after.is_none() {
+        fc.after = derive_after(
+            fc.before.as_deref(),
+            fc.patch.as_deref(),
+            &fc.kind,
+            fc.source_after.as_deref(),
+        )?;
+    }
 
-    fc.conflict_risk = Some(match fc.kind {
-        FileChangeKind::Binary => ConflictRisk::Low,
-        FileChangeKind::Delete if fc.before.is_none() => ConflictRisk::High,
-        FileChangeKind::Add if fc.before.is_some() => ConflictRisk::High,
-        _ => check_apply(kind, wc_root, fc),
-    });
+    if fc.conflict_risk.is_none() {
+        fc.conflict_risk = Some(match fc.kind {
+            FileChangeKind::Binary => ConflictRisk::Low,
+            FileChangeKind::Delete if fc.before.is_none() => ConflictRisk::High,
+            FileChangeKind::Add if fc.before.is_some() => ConflictRisk::High,
+            _ => check_apply(kind, wc_root, fc),
+        });
+    }
     Ok(())
 }
 
