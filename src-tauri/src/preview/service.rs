@@ -1,50 +1,28 @@
 use crate::{
-
-    error::{AppError, Result},
-
-    mapper::{Mapper, PathMapping},
-
-    model::{
-
-        ConflictRisk, DiffStats, FileChange, FileChangeKind, PreviewResult, PreviewUnit,
-
-    },
-
-    preview::patch_apply::{
-        apply_unified_patch, merge_patches_last_wins,
-        reconstruct_new_from_patch, reconstruct_old_from_patch, resolve_target_after,
-    },
-
-    preview::target_wc::{enrich_files, TargetWcKind},
-
-    store::models::RepoType,
-
-    vcs::factory::SourceReader,
-
-    vcs::svn::parse_svn_revision,
-
     diff::line_diff::{count_line_stats, lines_to_diff},
-
+    error::{AppError, Result},
+    mapper::{Mapper, PathMapping},
+    model::{ConflictRisk, DiffStats, FileChange, FileChangeKind, PreviewResult, PreviewUnit},
     preview::git_wc::{read_wc_file, resolve_wc_path},
-
+    preview::patch_apply::{
+        apply_unified_patch, merge_patches_last_wins, reconstruct_new_from_patch,
+        reconstruct_old_from_patch, resolve_target_after,
+    },
+    preview::target_wc::{enrich_files, TargetWcKind},
+    store::models::RepoType,
+    vcs::factory::SourceReader,
+    vcs::svn::parse_svn_revision,
 };
-
-
 
 #[derive(Debug, Clone, serde::Deserialize)]
 
 pub struct MappingInput {
-
     pub from: String,
 
     pub to: String,
-
 }
 
-
-
 pub struct PreviewContext {
-
     pub reader: SourceReader,
 
     pub target_wc_path: String,
@@ -52,15 +30,10 @@ pub struct PreviewContext {
     pub target_kind: TargetWcKind,
 
     pub mappings: Vec<MappingInput>,
-
 }
 
-
-
 impl PreviewContext {
-
     pub fn new(
-
         reader: SourceReader,
 
         target_wc_path: String,
@@ -68,11 +41,8 @@ impl PreviewContext {
         target_kind: TargetWcKind,
 
         mappings: Vec<MappingInput>,
-
     ) -> Self {
-
         Self {
-
             reader,
 
             target_wc_path,
@@ -80,15 +50,10 @@ impl PreviewContext {
             target_kind,
 
             mappings,
-
         }
-
     }
 
-
-
     pub fn from_repos(
-
         source: &crate::store::models::RepoRecord,
 
         target: &crate::store::models::RepoRecord,
@@ -96,85 +61,47 @@ impl PreviewContext {
         password: Option<String>,
 
         mappings: Vec<MappingInput>,
-
     ) -> Result<Self> {
-
         let reader = SourceReader::from_repo(source, password)?;
 
         let target_kind = TargetWcKind::from(&target.repo_type);
 
         Ok(Self::new(
-
             reader,
-
             target.path.clone(),
-
             target_kind,
-
             mappings,
-
         ))
-
     }
-
 }
-
-
 
 pub fn target_kind_from_repo_type(repo_type: &RepoType) -> TargetWcKind {
-
     TargetWcKind::from(repo_type)
-
 }
 
-
-
-pub fn build_preview_plan(
-
-    ctx: &PreviewContext,
-
-    source_refs: &[String],
-
-) -> Result<PreviewResult> {
-
+pub fn build_preview_plan(ctx: &PreviewContext, source_refs: &[String]) -> Result<PreviewResult> {
     if source_refs.is_empty() {
-
         return Err(AppError::Vcs("no source revisions selected".into()));
-
     }
 
     if ctx.target_wc_path.trim().is_empty() {
-
         return Err(AppError::Vcs("target working copy path is empty".into()));
-
     }
 
-
-
     let mapper = Mapper::new(
-
         ctx.mappings
-
             .iter()
-
             .map(|m| PathMapping {
-
                 from: m.from.clone(),
 
                 to: m.to.clone(),
-
             })
-
             .collect(),
-
     );
-
-
 
     let mut units = Vec::with_capacity(source_refs.len());
 
     for source_ref in source_refs {
-
         let mut changeset = ctx.reader.load_changeset(source_ref)?;
 
         mapper.apply_to_files(&mut changeset.files)?;
@@ -187,88 +114,54 @@ pub fn build_preview_plan(
         )?;
 
         units.push(PreviewUnit {
-
             meta: changeset.meta,
 
             files: changeset.files,
-
         });
-
     }
 
     sort_units_chronological(&mut units);
     let ordered_refs = chronological_source_refs(&units);
 
-    let aggregated = aggregate_merged_by_target_path(
-        &units,
-        &ctx.target_wc_path,
-        &ordered_refs,
-        &ctx.reader,
-    )?;
+    let aggregated =
+        aggregate_merged_by_target_path(&units, &ctx.target_wc_path, &ordered_refs, &ctx.reader)?;
 
     let stats = compute_stats(&aggregated);
 
-
-
     Ok(PreviewResult {
-
         units,
 
         aggregated,
 
         stats,
-
     })
-
 }
 
-
-
 pub fn build_preview_plan_parallel(
-
     ctx: &PreviewContext,
 
     source_refs: &[String],
-
 ) -> Result<PreviewResult> {
-
     use rayon::prelude::*;
 
-
-
     if source_refs.is_empty() {
-
         return Err(AppError::Vcs("no source revisions selected".into()));
-
     }
 
     if ctx.target_wc_path.trim().is_empty() {
-
         return Err(AppError::Vcs("target working copy path is empty".into()));
-
     }
 
-
-
     let mapper = Mapper::new(
-
         ctx.mappings
-
             .iter()
-
             .map(|m| PathMapping {
-
                 from: m.from.clone(),
 
                 to: m.to.clone(),
-
             })
-
             .collect(),
-
     );
-
-
 
     let target_wc_path = ctx.target_wc_path.clone();
 
@@ -276,14 +169,9 @@ pub fn build_preview_plan_parallel(
 
     let reader = ctx.reader.clone();
 
-
-
     let mut units: Vec<PreviewUnit> = source_refs
-
         .par_iter()
-
         .map(|source_ref| {
-
             let mut changeset = reader.load_changeset(source_ref)?;
 
             mapper.apply_to_files(&mut changeset.files)?;
@@ -291,60 +179,50 @@ pub fn build_preview_plan_parallel(
             enrich_files(target_kind, &target_wc_path, &mut changeset.files, &reader)?;
 
             Ok(PreviewUnit {
-
                 meta: changeset.meta,
 
                 files: changeset.files,
-
             })
-
         })
-
         .collect::<Result<Vec<_>>>()?;
-
-
 
     sort_units_chronological(&mut units);
     let ordered_refs = chronological_source_refs(&units);
 
-    let aggregated = aggregate_merged_by_target_path(
-        &units,
-        &target_wc_path,
-        &ordered_refs,
-        &reader,
-    )?;
+    let aggregated =
+        aggregate_merged_by_target_path(&units, &target_wc_path, &ordered_refs, &reader)?;
 
     let stats = compute_stats(&aggregated);
 
-
-
     Ok(PreviewResult {
-
         units,
 
         aggregated,
 
         stats,
-
     })
-
 }
 
-
-
-pub fn get_aggregated_files(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
-
+pub fn get_aggregated_files(
+    ctx: &PreviewContext,
+    source_refs: &[String],
+) -> Result<Vec<FileChange>> {
     let preview = build_preview_plan_parallel(ctx, source_refs)?;
 
     Ok(preview.aggregated)
-
 }
 
-pub fn get_aggregated_files_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+pub fn get_aggregated_files_meta(
+    ctx: &PreviewContext,
+    source_refs: &[String],
+) -> Result<Vec<FileChange>> {
     build_preview_plan_meta(ctx, source_refs)
 }
 
-pub fn load_preview_units(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<PreviewUnit>> {
+pub fn load_preview_units(
+    ctx: &PreviewContext,
+    source_refs: &[String],
+) -> Result<Vec<PreviewUnit>> {
     use rayon::prelude::*;
 
     if source_refs.is_empty() {
@@ -383,7 +261,10 @@ pub fn load_preview_units(ctx: &PreviewContext, source_refs: &[String]) -> Resul
     Ok(units)
 }
 
-pub fn build_preview_plan_meta(ctx: &PreviewContext, source_refs: &[String]) -> Result<Vec<FileChange>> {
+pub fn build_preview_plan_meta(
+    ctx: &PreviewContext,
+    source_refs: &[String],
+) -> Result<Vec<FileChange>> {
     let units = load_preview_units(ctx, source_refs)?;
     let ordered_refs = chronological_source_refs(&units);
     aggregate_merged_by_target_path(&units, &ctx.target_wc_path, &ordered_refs, &ctx.reader)
@@ -397,7 +278,9 @@ pub fn get_merged_file_change(
     let units = load_preview_units(ctx, source_refs)?;
     let changes = changes_for_target_path(&units, file_path);
     if changes.is_empty() {
-        return Err(AppError::Vcs(format!("file not found in preview: {file_path}")));
+        return Err(AppError::Vcs(format!(
+            "file not found in preview: {file_path}"
+        )));
     }
     let target_path = changes[0]
         .target_path
@@ -413,8 +296,6 @@ pub fn get_merged_file_change(
     )?
     .ok_or_else(|| AppError::Vcs(format!("file not found in preview: {file_path}")))
 }
-
-
 
 fn unit_chrono_key(u: &PreviewUnit) -> u64 {
     if let Ok(rev) = parse_svn_revision(&u.meta.source_ref) {
@@ -464,7 +345,9 @@ fn has_net_change(kind: &FileChangeKind, before: Option<&str>, after: Option<&st
     add > 0 || del > 0
 }
 
-fn collect_changes_by_path(units: &[PreviewUnit]) -> std::collections::BTreeMap<String, Vec<FileChange>> {
+fn collect_changes_by_path(
+    units: &[PreviewUnit],
+) -> std::collections::BTreeMap<String, Vec<FileChange>> {
     let mut by_path: std::collections::BTreeMap<String, Vec<FileChange>> =
         std::collections::BTreeMap::new();
     for unit in units {
@@ -551,6 +434,28 @@ fn merge_file_changes_for_preview(
     let wc_before = read_wc_file(&wc_path);
     let latest = ordered.last().expect("non-empty");
 
+    if latest.kind == FileChangeKind::Add && wc_before.is_some() {
+        let display_patch = merge_patches_for_display(&ordered).or_else(|| latest.patch.clone());
+        let after_content = latest
+            .source_after
+            .clone()
+            .or_else(|| display_patch.as_deref().map(reconstruct_new_from_patch))
+            .filter(|s| !s.is_empty());
+        let first = &ordered[0];
+        return Ok(Some(FileChange {
+            path: first.path.clone(),
+            target_path: Some(target_path.to_string()),
+            kind: FileChangeKind::Add,
+            old_path: first.old_path.clone(),
+            before: wc_before,
+            after: after_content,
+            source_after: None,
+            source_ref: None,
+            patch: display_patch,
+            conflict_risk: Some(ConflictRisk::High),
+        }));
+    }
+
     if latest.kind == FileChangeKind::Delete {
         if wc_before.is_none() {
             return Ok(None);
@@ -620,12 +525,8 @@ fn merge_file_changes_for_preview(
     let after_content = if merge_context_ok {
         target_merged.clone()
     } else if let Some(before) = wc_before.as_deref() {
-        resolve_target_after(
-            before,
-            display_patch.as_deref(),
-            &patch_list,
-        )
-        .or(target_merged.clone())
+        resolve_target_after(before, display_patch.as_deref(), &patch_list)
+            .or(target_merged.clone())
     } else {
         target_merged.clone()
     };
@@ -664,10 +565,7 @@ fn infer_net_kind(before_exists: bool, after_exists: bool) -> FileChangeKind {
     }
 }
 
-
-
 fn compute_stats(files: &[FileChange]) -> DiffStats {
-
     let mut lines_added = 0usize;
 
     let mut lines_removed = 0usize;
@@ -676,58 +574,38 @@ fn compute_stats(files: &[FileChange]) -> DiffStats {
 
     let mut conflict_risk_count = 0usize;
 
-
-
     for f in files {
-
         if f.kind == FileChangeKind::Binary {
-
             binary_count += 1;
-
         }
 
         if f.conflict_risk == Some(ConflictRisk::High) {
-
             conflict_risk_count += 1;
-
         }
 
         if let Some(patch) = &f.patch {
-
             for line in patch.lines() {
-
                 if let Some(c) = line.chars().next() {
-
                     match c {
-
                         '+' if !line.starts_with("+++") => lines_added += 1,
 
                         '-' if !line.starts_with("---") => lines_removed += 1,
 
                         _ => {}
-
                     }
-
                 }
-
             }
-
         } else {
-
-            let (add, del) = count_line_stats(&lines_to_diff(f.before.as_deref(), f.after.as_deref()));
+            let (add, del) =
+                count_line_stats(&lines_to_diff(f.before.as_deref(), f.after.as_deref()));
 
             lines_added += add as usize;
 
             lines_removed += del as usize;
-
         }
-
     }
 
-
-
     DiffStats {
-
         files_changed: files.len(),
 
         lines_added,
@@ -737,12 +615,8 @@ fn compute_stats(files: &[FileChange]) -> DiffStats {
         binary_count,
 
         conflict_risk_count,
-
     }
-
 }
-
-
 
 #[cfg(test)]
 
@@ -799,10 +673,8 @@ mod tests {
             },
         ];
         let source_refs = vec!["svn:50557".into(), "svn:50556".into(), "svn:50545".into()];
-        let wc_root = std::env::temp_dir().join(format!(
-            "copy-diff-merge-test-{}",
-            std::process::id()
-        ));
+        let wc_root =
+            std::env::temp_dir().join(format!("copy-diff-merge-test-{}", std::process::id()));
         std::fs::create_dir_all(&wc_root).unwrap();
         let full_before = format!("<div>\n<textarea\n{line}\n</textarea>\n</div>\n");
         std::fs::write(wc_root.join("a.html"), &full_before).unwrap();
@@ -860,10 +732,8 @@ mod tests {
             patch: Some(patch),
             conflict_risk: None,
         }];
-        let wc_root = std::env::temp_dir().join(format!(
-            "copy-diff-ctx-fail-test-{}",
-            std::process::id()
-        ));
+        let wc_root =
+            std::env::temp_dir().join(format!("copy-diff-ctx-fail-test-{}", std::process::id()));
         std::fs::create_dir_all(&wc_root).unwrap();
         let full_before = format!("<div>\n<textarea\n{line}\n</textarea>\n</div>\n");
         std::fs::write(wc_root.join("a.html"), &full_before).unwrap();
@@ -888,5 +758,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&wc_root);
     }
 }
-
-

@@ -1,4 +1,7 @@
-use crate::{error::{AppError, Result}, model::FileChange};
+use crate::{
+    error::{AppError, Result},
+    model::FileChange,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +51,7 @@ impl Mapper {
 
 fn normalize_mapping_prefix(from: &str) -> String {
     let t = from.trim();
-    if t.is_empty() {
+    if t.is_empty() || t == "." {
         "/".to_string()
     } else if t.starts_with('/') {
         t.to_string()
@@ -100,8 +103,14 @@ mod tests {
 
     fn make_mapper() -> Mapper {
         Mapper::new(vec![
-            PathMapping { from: "/trunk/module-a".into(), to: "packages/module-a".into() },
-            PathMapping { from: "/trunk".into(), to: ".".into() },
+            PathMapping {
+                from: "/trunk/module-a".into(),
+                to: "packages/module-a".into(),
+            },
+            PathMapping {
+                from: "/trunk".into(),
+                to: ".".into(),
+            },
         ])
     }
 
@@ -123,11 +132,26 @@ mod tests {
     #[test]
     fn maps_repo_relative_paths_with_root_rule() {
         let m = Mapper::new(vec![
-            PathMapping { from: "/trunk".into(), to: ".".into() },
-            PathMapping { from: "/".into(), to: ".".into() },
+            PathMapping {
+                from: "/trunk".into(),
+                to: ".".into(),
+            },
+            PathMapping {
+                from: "/".into(),
+                to: ".".into(),
+            },
         ]);
         assert_eq!(m.map("/src/main.rs").unwrap(), "src/main.rs");
         assert_eq!(m.map("/README.md").unwrap(), "README.md");
+    }
+
+    #[test]
+    fn dot_source_prefix_maps_repo_root() {
+        let m = Mapper::new(vec![PathMapping {
+            from: ".".into(),
+            to: ".".into(),
+        }]);
+        assert_eq!(m.map("/src/main.rs").unwrap(), "src/main.rs");
     }
 
     #[test]

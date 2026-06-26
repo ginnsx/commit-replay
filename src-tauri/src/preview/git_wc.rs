@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use crate::error::{AppError, Result};
 use crate::model::{ConflictRisk, FileChange, FileChangeKind};
+use std::path::{Path, PathBuf};
 
 /// Join target working copy root with a mapped relative path.
 pub fn resolve_wc_path(wc_root: &str, target_path: &str) -> PathBuf {
@@ -23,7 +23,7 @@ pub fn check_apply(wc_root: &str, fc: &FileChange) -> ConflictRisk {
         return ConflictRisk::High;
     };
 
-    let Ok(status) = run_git_apply_check(wc_root, target, patch) else {
+    let Ok(status) = run_git_apply_check(wc_root, target, patch, &fc.kind) else {
         return ConflictRisk::High;
     };
 
@@ -34,14 +34,21 @@ pub fn check_apply(wc_root: &str, fc: &FileChange) -> ConflictRisk {
     }
 }
 
-fn run_git_apply_check(wc_root: &str, target_path: &str, patch_body: &str) -> Result<bool> {
+fn run_git_apply_check(
+    wc_root: &str,
+    target_path: &str,
+    patch_body: &str,
+    kind: &FileChangeKind,
+) -> Result<bool> {
     use std::io::Write;
     use std::process::Stdio;
 
-    let header = format!(
-        "--- a/{target_path}\n+++ b/{target_path}\n",
-        target_path = target_path.trim_start_matches("./")
-    );
+    let clean_target = target_path.trim_start_matches("./");
+    let header = match kind {
+        FileChangeKind::Add => format!("--- /dev/null\n+++ b/{clean_target}\n"),
+        FileChangeKind::Delete => format!("--- a/{clean_target}\n+++ /dev/null\n"),
+        _ => format!("--- a/{clean_target}\n+++ b/{clean_target}\n"),
+    };
     let full_patch = format!("{header}{patch_body}");
 
     let mut child = crate::process::command("git")
@@ -76,15 +83,11 @@ pub fn derive_after(
         FileChangeKind::Delete => Ok(None),
         FileChangeKind::Binary => Ok(None),
         FileChangeKind::Add => {
-            let patch = patch.ok_or_else(|| {
-                AppError::Vcs("add change missing patch".into())
-            })?;
+            let patch = patch.ok_or_else(|| AppError::Vcs("add change missing patch".into()))?;
             Ok(Some(apply_patch_or_lines(before, patch, source_after)?))
         }
         FileChangeKind::Modify | FileChangeKind::Rename => {
-            let patch = patch.ok_or_else(|| {
-                AppError::Vcs("modify change missing patch".into())
-            })?;
+            let patch = patch.ok_or_else(|| AppError::Vcs("modify change missing patch".into()))?;
             Ok(Some(apply_patch_or_lines(before, patch, source_after)?))
         }
     }
@@ -139,7 +142,8 @@ mod tests {
              -\"    pb.remark as remark,\\n\" +\n \
              +\"    pb.bin as binTwo,\\n\" +\n \
              \t\t\t\"    ii.OC_OR_SCREEN_TYPE AS ocOrScreenType  \\n\" +\n";
-        let git_before = "line380\n    private Integer inventoryItemId;\n    private String itemCode;\n";
+        let git_before =
+            "line380\n    private Integer inventoryItemId;\n    private String itemCode;\n";
         let after = derive_after(
             Some(git_before),
             Some(patch),

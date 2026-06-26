@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
 
+use super::VcsWriter;
 use crate::{
     error::{AppError, Result},
     model::{
@@ -11,7 +12,6 @@ use crate::{
     preview::git_wc::resolve_wc_path,
     store::models::IntegrationStrategy,
 };
-use super::VcsWriter;
 
 pub struct GitWriter {
     pub repo_path: String,
@@ -60,10 +60,12 @@ impl GitWriter {
             .target_path
             .as_deref()
             .ok_or_else(|| AppError::Mapping("missing target_path".into()))?;
-        let header = format!(
-            "--- a/{target}\n+++ b/{target}\n",
-            target = target.trim_start_matches("./")
-        );
+        let clean_target = target.trim_start_matches("./");
+        let header = match fc.kind {
+            FileChangeKind::Add => format!("--- /dev/null\n+++ b/{clean_target}\n"),
+            FileChangeKind::Delete => format!("--- a/{clean_target}\n+++ /dev/null\n"),
+            _ => format!("--- a/{clean_target}\n+++ b/{clean_target}\n"),
+        };
         let full_patch = format!("{header}{patch}");
         let mut child = crate::process::command("git")
             .current_dir(&self.repo_path)
@@ -107,7 +109,11 @@ impl GitWriter {
         }
     }
 
-    pub fn apply_file_with_strategy(&self, fc: &FileChange, strategy: IntegrationStrategy) -> Result<()> {
+    pub fn apply_file_with_strategy(
+        &self,
+        fc: &FileChange,
+        strategy: IntegrationStrategy,
+    ) -> Result<()> {
         let target = fc
             .target_path
             .as_deref()
@@ -245,7 +251,11 @@ impl GitWriter {
         Ok(sha.trim().to_string())
     }
 
-    pub fn commit_allow_empty(&self, meta: &ReplayUnitMeta, message_template: &str) -> Result<String> {
+    pub fn commit_allow_empty(
+        &self,
+        meta: &ReplayUnitMeta,
+        message_template: &str,
+    ) -> Result<String> {
         let msg = if message_template.is_empty() {
             format!("relay: {}", meta.message)
         } else {
