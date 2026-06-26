@@ -56,8 +56,10 @@ fn validate_integration_plan(
 fn unit_apply_strategy(
     path: &str,
     aggregated: IntegrationStrategy,
+    status: IntegrationStatus,
     resolved_blocked: &[String],
     squash_commits: bool,
+    has_patch: bool,
 ) -> IntegrationStrategy {
     let eff = effective_strategy(path, aggregated, resolved_blocked);
     if eff == IntegrationStrategy::WriteAfter && resolved_blocked.iter().any(|id| id == path) {
@@ -65,6 +67,12 @@ fn unit_apply_strategy(
     }
     if squash_commits && eff == IntegrationStrategy::WriteAfter {
         IntegrationStrategy::Skip
+    } else if !squash_commits
+        && status == IntegrationStatus::AutoOk
+        && eff == IntegrationStrategy::WriteAfter
+        && has_patch
+    {
+        IntegrationStrategy::ApplyPatch
     } else {
         eff
     }
@@ -85,9 +93,7 @@ fn prepare_finalize_file(
             .filter(|f| f.target_path.as_deref() == Some(tp))
             .filter_map(|f| f.patch.as_deref())
             .collect();
-        if let Some(after) =
-            resolve_target_after(before, out.patch.as_deref(), &patches)
-        {
+        if let Some(after) = resolve_target_after(before, out.patch.as_deref(), &patches) {
             out.after = Some(after);
         }
     }
@@ -114,8 +120,7 @@ fn effective_strategy(
     strategy: IntegrationStrategy,
     resolved_blocked: &[String],
 ) -> IntegrationStrategy {
-    if strategy == IntegrationStrategy::ManualMerge
-        && resolved_blocked.iter().any(|id| id == path)
+    if strategy == IntegrationStrategy::ManualMerge && resolved_blocked.iter().any(|id| id == path)
     {
         IntegrationStrategy::WriteAfter
     } else {
@@ -185,9 +190,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                AppError::Validation("合并为单次提交时需填写 commit message".into())
-            })?;
+            .ok_or_else(|| AppError::Validation("合并为单次提交时需填写 commit message".into()))?;
         Some(msg.to_string())
     } else {
         None
@@ -205,6 +208,11 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         migration_mode,
     );
     let strategies = strategy_map(&plan);
+    let statuses: std::collections::HashMap<String, IntegrationStatus> = plan
+        .items
+        .iter()
+        .map(|i| (i.path.clone(), i.integration_status))
+        .collect();
     validate_integration_plan(&plan, &accepted_review, &resolved_blocked)?;
 
     let target_password = decrypt_repo_pass(&target)?;
@@ -218,9 +226,17 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             .filter_map(|fc| {
                 let tp = fc.target_path.as_deref()?;
                 let agg = strategies.get(tp).copied()?;
+                let status = statuses.get(tp).copied()?;
                 Some((
                     tp.to_string(),
-                    unit_apply_strategy(tp, agg, &resolved_blocked, squash_commits),
+                    unit_apply_strategy(
+                        tp,
+                        agg,
+                        status,
+                        &resolved_blocked,
+                        squash_commits,
+                        fc.patch.is_some(),
+                    ),
                 ))
             })
             .collect();
@@ -239,7 +255,10 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            let _ = writer.commit_allow_empty(&unit.meta, "relay: {message}")?;
+            if let Err(err) = writer.commit_allow_empty(&unit.meta, "relay: {message}") {
+                let _ = writer.rollback(&checkpoint);
+                return Err(err);
+            }
             commits_applied += 1;
         }
     }
@@ -249,9 +268,9 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         .iter()
         .filter(|fc| {
             fc.target_path.as_ref().is_some_and(|tp| {
-                strategies
-                    .get(tp)
-                    .is_some_and(|s| should_finalize_path(tp, *s, &resolved_blocked, squash_commits))
+                strategies.get(tp).is_some_and(|s| {
+                    should_finalize_path(tp, *s, &resolved_blocked, squash_commits)
+                })
             })
         })
         .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
@@ -285,14 +304,20 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            let _ = writer.commit_with_message("relay: finalized conflicts")?;
+            if let Err(err) = writer.commit_with_message("relay: finalized conflicts") {
+                let _ = writer.rollback(&checkpoint);
+                return Err(err);
+            }
             commits_applied += 1;
         }
     }
 
     if squash_commits {
         let msg = squash_message.as_deref().expect("validated above");
-        let _ = writer.commit_with_message(msg)?;
+        if let Err(err) = writer.commit_with_message(msg) {
+            let _ = writer.rollback(&checkpoint);
+            return Err(err);
+        }
         commits_applied = 1;
     }
 
@@ -374,10 +399,10 @@ pub async fn execute_migration(
             .0
             .lock()
             .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
-        let source = get_repo(&conn, &source_id)?
-            .ok_or_else(|| AppError::Vcs("source not found".into()))?;
-        let target = get_repo(&conn, &target_id)?
-            .ok_or_else(|| AppError::Vcs("target not found".into()))?;
+        let source =
+            get_repo(&conn, &source_id)?.ok_or_else(|| AppError::Vcs("source not found".into()))?;
+        let target =
+            get_repo(&conn, &target_id)?.ok_or_else(|| AppError::Vcs("target not found".into()))?;
         MigrationWork {
             source,
             target,

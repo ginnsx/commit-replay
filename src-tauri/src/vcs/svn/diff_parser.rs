@@ -20,7 +20,11 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                  binary: &mut bool| {
         let norm = |p: &str| normalize_svn_path(p, wc_root);
         if *binary {
-            if let Some(path) = index_path.take().or_else(|| new.clone()).or_else(|| old.clone()) {
+            if let Some(path) = index_path
+                .take()
+                .or_else(|| new.clone())
+                .or_else(|| old.clone())
+            {
                 files.push(FileChange {
                     path: norm(&path),
                     target_path: None,
@@ -34,14 +38,17 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                     conflict_risk: None,
                 });
             }
-        } else if let Some(path) = new
-            .clone()
-            .or_else(|| old.clone())
+        } else if let Some(path) = preferred_change_path(new.as_deref(), old.as_deref())
+            .map(str::to_string)
             .or_else(|| index_path.clone())
         {
             let path = norm(&path);
             let kind = infer_kind(old.as_deref(), new.as_deref(), patch, wc_root);
-            let patch_body = if patch.is_empty() { None } else { Some(patch.clone()) };
+            let patch_body = if patch.is_empty() {
+                None
+            } else {
+                Some(patch.clone())
+            };
             files.push(FileChange {
                 path: path.clone(),
                 target_path: None,
@@ -123,16 +130,41 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
 fn parse_diff_path_line(line: &str, prefix: &str) -> String {
     let rest = line.strip_prefix(prefix).unwrap_or(line).trim();
     let path = rest.split('\t').next().unwrap_or(rest).trim();
-    path.to_string()
+    strip_git_diff_prefix(path).to_string()
+}
+
+fn strip_git_diff_prefix(path: &str) -> &str {
+    if path == "/dev/null" {
+        return path;
+    }
+    path.strip_prefix("a/")
+        .or_else(|| path.strip_prefix("b/"))
+        .unwrap_or(path)
+}
+
+fn preferred_change_path<'a>(new: Option<&'a str>, old: Option<&'a str>) -> Option<&'a str> {
+    match (new, old) {
+        (Some("/dev/null"), Some(old_path)) => Some(old_path),
+        (Some(new_path), _) => Some(new_path),
+        (None, Some(old_path)) => Some(old_path),
+        (None, None) => None,
+    }
 }
 
 fn normalize_svn_path(path: &str, wc_root: Option<&str>) -> String {
     let p = path.trim().replace('\\', "/");
     if let Some(root) = wc_root.filter(|r| !r.trim().is_empty()) {
-        let root_norm = root.trim().replace('\\', "/").trim_end_matches('/').to_lowercase();
+        let root_norm = root
+            .trim()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_lowercase();
         let p_cmp = p.to_lowercase();
         if p_cmp.starts_with(&root_norm)
-            && p_cmp.as_bytes().get(root_norm.len()).is_none_or(|b| *b == b'/')
+            && p_cmp
+                .as_bytes()
+                .get(root_norm.len())
+                .is_none_or(|b| *b == b'/')
         {
             let suffix = p[root_norm.len()..].trim_start_matches('/');
             return if suffix.is_empty() {
@@ -218,6 +250,32 @@ mod tests {
     #[test]
     fn empty_diff_returns_empty_vec() {
         assert!(parse_unified_diff("", None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn strips_git_a_b_prefixes() {
+        let diff = "diff --git a/src/main.rs b/src/main.rs\n\
+--- a/src/main.rs\n\
++++ b/src/main.rs\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n";
+        let files = parse_unified_diff(diff, Some("C:\\repo")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/src/main.rs");
+    }
+
+    #[test]
+    fn uses_old_path_for_git_delete() {
+        let diff = "diff --git a/src/remove.rs b/src/remove.rs\n\
+--- a/src/remove.rs\n\
++++ /dev/null\n\
+@@ -1 +0,0 @@\n\
+-old\n";
+        let files = parse_unified_diff(diff, Some("C:\\repo")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/src/remove.rs");
+        assert_eq!(files[0].kind, FileChangeKind::Delete);
     }
 
     #[test]
