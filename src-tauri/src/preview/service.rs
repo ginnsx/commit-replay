@@ -573,7 +573,13 @@ fn merge_file_changes_for_preview(
         analysis: None,
     };
 
-    let analysis_patch = display_patch.or_else(|| merge_patches_for_display(&ordered));
+    let analysis_patch = display_patch.or_else(|| {
+        if ordered.len() == 1 {
+            latest.patch.clone()
+        } else {
+            None
+        }
+    });
     if let Some(patch) = analysis_patch {
         let mut analysis_input = merged.clone();
         analysis_input.patch = Some(patch);
