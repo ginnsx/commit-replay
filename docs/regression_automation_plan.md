@@ -332,6 +332,8 @@ svn status $target
 npm run test:regression:smoke
 npm run test:regression:safety
 npm run test:regression:release
+npm run test:regression:ui
+npm run test:regression:all
 ```
 
 产物写入：
@@ -356,7 +358,8 @@ artifacts/regression/<run_id>/cases/<case_id>/after/manifest.json
   "test:regression:smoke": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite smoke",
   "test:regression:safety": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite production-safety",
   "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release",
-  "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release"
+  "test:regression:ui": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite ui-smoke",
+  "test:regression:all": "npm run test:regression:release && npm run test:regression:ui"
 }
 ```
 
@@ -374,10 +377,12 @@ scripts/regression/run-regression.ps1 `
 
 | 套件 | 用途 | 覆盖 |
 |---|---|---|
-| `smoke` | 每次提交前快速运行 | Git -> Git 的 F01、I01、I02、I03 |
-| `production-safety` | 发布前必跑 | I01-I08 + D07-D10 + E09-E10 + F08 |
-| `release` | 完整回归 | 黑盒测试集中所有可自动化用例 |
-| `ui-smoke` | UI 冒烟 | 添加仓库、选择提交、预览、生成计划 |
+| `smoke` | 每次提交前快速运行 | Git -> Git 的 I01、I03、I04 |
+| `production-safety` | 修改迁移核心前必跑 | Git -> Git 的 I01-I08、文件复杂度、路径映射、迁移模式、squash、回滚、历史记录 smoke |
+| `release` | 完整回归 | `production-safety` + 本地 SVN 的 SVN -> Git、Git -> SVN、SVN -> SVN 核心矩阵 |
+| `ui-smoke` | UI 冒烟 | 当前记录为可跳过门禁；接入 tauri-driver/WebDriver 后覆盖添加仓库、选择提交、预览、生成计划 |
+
+SVN 用例使用本地 `svnadmin create` 和 `svn checkout file://...`，不访问网络。本机缺少 `svn` 或 `svnadmin` 时对应 case 会写入 skipped 原因；正式 release 环境应安装 SVN 工具并要求 SVN case 零 skipped。
 
 ## CI 规则
 

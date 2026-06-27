@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("smoke", "production-safety", "release")]
+  [ValidateSet("smoke", "production-safety", "release", "ui-smoke")]
   [string]$Suite = "production-safety",
   [string]$OutDir = "artifacts/regression",
   [switch]$KeepPassed
