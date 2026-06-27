@@ -25,6 +25,10 @@ use sha2::{Digest, Sha256};
 
 const BASE_EXISTING: &str = "alpha\nold\nomega\n";
 const MOD_EXISTING: &str = "alpha\nnew\nomega\n";
+const DRIFT_EXISTING: &str = "header\nalpha\nold\nomega\nfooter\n";
+const DRIFT_MOD_EXISTING: &str = "header\nalpha\nnew\nomega\nfooter\n";
+const SAME_REGION_TARGET: &str = "alpha\ntarget\nomega\n";
+const MULTI_CANDIDATE_EXISTING: &str = "alpha\nold\nomega\nbetween\nalpha\nold\nomega\n";
 const BASE_CHAIN: &str = "one\nbase\nthree\n";
 const STEP1_CHAIN: &str = "one\nstep1\nthree\n";
 const STEP2_CHAIN: &str = "one\nstep2\nthree\n";
@@ -86,6 +90,9 @@ enum TargetSetup {
     OccupiedNewFile,
     ExistingDirectoryAtNewFile,
     AlreadyHasModify,
+    DriftedModify,
+    SameRegionModify,
+    MultiCandidateModify,
 }
 
 #[derive(Debug, Clone)]
@@ -1200,6 +1207,26 @@ fn apply_target_setup(target: &Path, vcs: VcsKind, setup: TargetSetup) -> AppRes
             write_text(target, vcs.target_rel("src/existing.txt"), MOD_EXISTING)?;
             commit_target(target, vcs, "target already has expected modify")?;
         }
+        TargetSetup::DriftedModify => {
+            write_text(target, vcs.target_rel("src/existing.txt"), DRIFT_EXISTING)?;
+            commit_target(target, vcs, "target has drifted modify context")?;
+        }
+        TargetSetup::SameRegionModify => {
+            write_text(
+                target,
+                vcs.target_rel("src/existing.txt"),
+                SAME_REGION_TARGET,
+            )?;
+            commit_target(target, vcs, "target has same region edit")?;
+        }
+        TargetSetup::MultiCandidateModify => {
+            write_text(
+                target,
+                vcs.target_rel("src/existing.txt"),
+                MULTI_CANDIDATE_EXISTING,
+            )?;
+            commit_target(target, vcs, "target has multiple candidate blocks")?;
+        }
     }
     Ok(())
 }
@@ -1862,6 +1889,55 @@ fn git_safety_cases() -> Vec<CaseSpec> {
             set_unchanged(&mut c, vec!["src/existing.txt"]);
             c.checks_history = true;
             c
+        },
+        {
+            let mut c = success_case(
+                "F11-GG-context-drift-auto-merge",
+                VcsKind::Git,
+                VcsKind::Git,
+                vec!["C02-modify-text"],
+                changed(&[(
+                    "src/existing.txt",
+                    ExpectedContent::Text(DRIFT_MOD_EXISTING),
+                )]),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::DriftedModify;
+            c.accept_review = true;
+            c
+        },
+        {
+            let mut c = success_case(
+                "F12-GG-already-contained-skip",
+                VcsKind::Git,
+                VcsKind::Git,
+                vec!["C02-modify-text"],
+                BTreeMap::new(),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::AlreadyHasModify;
+            set_unchanged(&mut c, vec!["src/existing.txt"]);
+            c
+        },
+        {
+            failure_case(
+                "F13-GG-same-region-conflict",
+                vec!["C02-modify-text"],
+                TargetSetup::SameRegionModify,
+                "execute",
+                "blocked",
+            )
+        },
+        {
+            failure_case(
+                "F14-GG-multiple-candidates-blocked",
+                vec!["C02-modify-text"],
+                TargetSetup::MultiCandidateModify,
+                "execute",
+                "blocked",
+            )
         },
     ];
     if cfg!(windows) {

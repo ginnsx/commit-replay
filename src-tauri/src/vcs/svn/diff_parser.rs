@@ -36,6 +36,7 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                     source_ref: None,
                     patch: None,
                     conflict_risk: None,
+                    analysis: None,
                 });
             }
         } else if let Some(path) = preferred_change_path(new.as_deref(), old.as_deref())
@@ -60,6 +61,7 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
                 source_ref: None,
                 patch: patch_body,
                 conflict_risk: None,
+                analysis: None,
             });
         }
 

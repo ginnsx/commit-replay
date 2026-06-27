@@ -152,6 +152,16 @@ pub struct IntegrationItemView {
     pub strategy: IntegrationStrategy,
     pub reason: String,
     pub overlap_lines: Option<[u32; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_status: Option<crate::model::LocationStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_status: Option<crate::model::MergeStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_method: Option<crate::model::MatchMethod>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<usize>,
     pub before: Vec<String>,
     pub after: Vec<String>,
     pub diff: Vec<DiffLine>,

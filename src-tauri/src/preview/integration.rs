@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     diff::line_diff::{find_overlap_lines, lines_to_diff, patch_to_diff_lines},
-    model::{FileChange, FileChangeKind},
+    model::{FileChange, FileChangeKind, LocationStatus, MergeStatus},
     preview::patch_apply::{reconstruct_new_from_patch, reconstruct_old_from_patch},
     preview::target_wc::{check_apply, TargetWcKind},
     relay::file_kind_to_status,
@@ -161,6 +161,11 @@ pub fn build_integration_plan(
             strategy,
             reason,
             overlap_lines: find_overlap_lines(&before_lines, &after_lines),
+            location_status: fc.analysis.as_ref().map(|a| a.location_status.clone()),
+            merge_status: fc.analysis.as_ref().map(|a| a.merge_status.clone()),
+            match_method: fc.analysis.as_ref().map(|a| a.match_method.clone()),
+            confidence: fc.analysis.as_ref().map(|a| a.confidence),
+            candidate_count: fc.analysis.as_ref().map(|a| a.candidate_count),
             before: before_lines,
             after: after_lines,
             diff,
@@ -254,6 +259,10 @@ fn classify_modify(
     target_kind: TargetWcKind,
     mode: MigrationMode,
 ) -> (IntegrationStatus, IntegrationStrategy, String) {
+    if let Some(analysis) = &fc.analysis {
+        return classify_analysis(analysis);
+    }
+
     if fc.conflict_risk == Some(crate::model::ConflictRisk::High) {
         return (
             IntegrationStatus::Blocked,
@@ -345,10 +354,58 @@ fn classify_modify(
     }
 }
 
+fn classify_analysis(
+    analysis: &crate::model::ChangeAnalysis,
+) -> (IntegrationStatus, IntegrationStrategy, String) {
+    match (&analysis.location_status, &analysis.merge_status) {
+        (LocationStatus::Exact, MergeStatus::AutoApply) => (
+            IntegrationStatus::AutoOk,
+            IntegrationStrategy::ApplyPatch,
+            analysis.reason.clone(),
+        ),
+        (LocationStatus::ContextDrift, MergeStatus::AutoMerge) => (
+            IntegrationStatus::Review,
+            IntegrationStrategy::WriteAfter,
+            analysis.reason.clone(),
+        ),
+        (LocationStatus::AlreadyContains, MergeStatus::Skip) => (
+            IntegrationStatus::AutoOk,
+            IntegrationStrategy::Skip,
+            analysis.reason.clone(),
+        ),
+        (_, MergeStatus::KeepTarget) => (
+            IntegrationStatus::AutoOk,
+            IntegrationStrategy::Skip,
+            analysis.reason.clone(),
+        ),
+        (
+            LocationStatus::MultipleCandidates
+            | LocationStatus::NotFound
+            | LocationStatus::SameRegionConflict
+            | LocationStatus::FileMissing
+            | LocationStatus::PathUnmapped,
+            _,
+        )
+        | (_, MergeStatus::Conflict) => (
+            IntegrationStatus::Blocked,
+            IntegrationStrategy::ManualMerge,
+            analysis.reason.clone(),
+        ),
+        _ => (
+            IntegrationStatus::Review,
+            IntegrationStrategy::WriteAfter,
+            analysis.reason.clone(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::models::{IntegrationStatus, IntegrationStrategy};
+    use crate::{
+        model::{ChangeAnalysis, LocationStatus, MatchMethod, MergeStatus},
+        store::models::{IntegrationStatus, IntegrationStrategy},
+    };
 
     fn modify_fc(before: &str, after: &str, patch: &str) -> FileChange {
         FileChange {
@@ -362,6 +419,7 @@ mod tests {
             source_ref: None,
             patch: Some(patch.into()),
             conflict_risk: None,
+            analysis: None,
         }
     }
 
@@ -378,6 +436,7 @@ mod tests {
             source_ref: None,
             patch: Some("@@ -1,1 +1,1 @@\n-old\n+new\n".into()),
             conflict_risk: Some(crate::model::ConflictRisk::High),
+            analysis: None,
         };
         let plan = build_integration_plan(
             &[fc],
@@ -392,7 +451,12 @@ mod tests {
     #[test]
     fn skip_when_target_equals_after() {
         let fc = modify_fc("same\n", "same\n", "@@ -1 +1 @@\n same\n");
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
     }
@@ -410,8 +474,14 @@ mod tests {
             source_ref: None,
             patch: Some("@@ -0,0 +1,1 @@\n+new\n".into()),
             conflict_risk: None,
+            analysis: None,
         };
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.blocked_count, 1);
         assert_eq!(plan.items[0].integration_status, IntegrationStatus::Blocked);
     }
@@ -423,7 +493,12 @@ mod tests {
             "svn version\n",
             "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::StrictReplay);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::StrictReplay,
+        );
         assert_eq!(plan.blocked_count, 1);
         assert_eq!(plan.items[0].reason, "严格模式：补丁无法干净应用");
     }
@@ -435,7 +510,12 @@ mod tests {
             "new line\nunchanged\n",
             "@@ -1,3 +1,3 @@\n # Project\n-old line\n+new line\n unchanged\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.review_count, 1);
         assert_eq!(plan.items[0].integration_status, IntegrationStatus::Review);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::WriteAfter);
@@ -448,7 +528,12 @@ mod tests {
             "header\nincoming\nfooter\n",
             "@@ -1,3 +1,3 @@\n header\n-old\n+incoming\n footer\n",
         );
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.blocked_count, 1);
     }
 
@@ -460,7 +545,12 @@ mod tests {
             "# Project\nnew line\nunchanged\n",
             patch,
         );
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.blocked_count, 0);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
@@ -479,9 +569,131 @@ mod tests {
             source_ref: None,
             patch: Some("@@ -0,0 +1,2 @@\n+line1\n+line2\n".into()),
             conflict_risk: None,
+            analysis: None,
         };
-        let plan = build_integration_plan(&[fc], "/tmp", TargetWcKind::Git, MigrationMode::IncrementalFirst);
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
+    }
+
+    fn analysis(
+        location_status: LocationStatus,
+        merge_status: MergeStatus,
+        reason: &str,
+    ) -> ChangeAnalysis {
+        ChangeAnalysis {
+            target_path: Some("a.txt".into()),
+            location_status,
+            match_method: MatchMethod::Context,
+            confidence: 0.75,
+            candidate_count: 1,
+            merge_status,
+            reason: reason.into(),
+        }
+    }
+
+    #[test]
+    fn analysis_exact_auto_apply_drives_auto_ok() {
+        let mut fc = modify_fc(
+            "alpha\nold\nomega\n",
+            "alpha\nnew\nomega\n",
+            "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n",
+        );
+        fc.analysis = Some(analysis(
+            LocationStatus::Exact,
+            MergeStatus::AutoApply,
+            "source old block matched",
+        ));
+
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        assert_eq!(plan.auto_ok_count, 1);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::ApplyPatch);
+        assert_eq!(plan.items[0].location_status, Some(LocationStatus::Exact));
+    }
+
+    #[test]
+    fn analysis_context_drift_auto_merge_requires_review() {
+        let mut fc = modify_fc(
+            "header\nalpha\nold\nomega\nfooter\n",
+            "header\nalpha\nnew\nomega\nfooter\n",
+            "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n",
+        );
+        fc.conflict_risk = Some(crate::model::ConflictRisk::High);
+        fc.analysis = Some(analysis(
+            LocationStatus::ContextDrift,
+            MergeStatus::AutoMerge,
+            "context drift",
+        ));
+
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        assert_eq!(plan.review_count, 1);
+        assert_eq!(plan.items[0].integration_status, IntegrationStatus::Review);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::WriteAfter);
+        assert_eq!(plan.items[0].merge_status, Some(MergeStatus::AutoMerge));
+    }
+
+    #[test]
+    fn analysis_already_contains_skips() {
+        let mut fc = modify_fc(
+            "alpha\nnew\nomega\n",
+            "alpha\nnew\nomega\n",
+            "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n",
+        );
+        fc.analysis = Some(analysis(
+            LocationStatus::AlreadyContains,
+            MergeStatus::Skip,
+            "already contained",
+        ));
+
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        assert_eq!(plan.auto_ok_count, 1);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
+    }
+
+    #[test]
+    fn analysis_conflict_status_blocks() {
+        let mut fc = modify_fc(
+            "alpha\ntarget\nomega\n",
+            "alpha\ntarget\nomega\n",
+            "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n",
+        );
+        fc.analysis = Some(analysis(
+            LocationStatus::SameRegionConflict,
+            MergeStatus::Conflict,
+            "same region conflict",
+        ));
+
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        assert_eq!(plan.blocked_count, 1);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::ManualMerge);
     }
 }

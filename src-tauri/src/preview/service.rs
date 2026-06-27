@@ -3,6 +3,7 @@ use crate::{
     error::{AppError, Result},
     mapper::{Mapper, PathMapping},
     model::{ConflictRisk, DiffStats, FileChange, FileChangeKind, PreviewResult, PreviewUnit},
+    preview::change_analysis::analyze_file_change,
     preview::git_wc::{read_wc_file, resolve_wc_path},
     preview::patch_apply::{
         apply_unified_patch, merge_patches_last_wins, reconstruct_new_from_patch,
@@ -458,6 +459,7 @@ fn merge_file_changes_for_preview(
             source_ref: None,
             patch: display_patch,
             conflict_risk: Some(ConflictRisk::High),
+            analysis: None,
         }));
     }
 
@@ -476,6 +478,7 @@ fn merge_file_changes_for_preview(
             source_ref: None,
             patch: None,
             conflict_risk: Some(ConflictRisk::Low),
+            analysis: None,
         }));
     }
 
@@ -556,18 +559,29 @@ fn merge_file_changes_for_preview(
     }
 
     let first = &ordered[0];
-    Ok(Some(FileChange {
+    let mut merged = FileChange {
         path: first.path.clone(),
         target_path: Some(target_path.to_string()),
         kind,
         old_path: first.old_path.clone(),
-        before: wc_before,
+        before: wc_before.clone(),
         after: after_content,
         source_after: latest.source_after.clone(),
         source_ref: None,
-        patch: display_patch,
+        patch: display_patch.clone(),
         conflict_risk: Some(conflict_risk),
-    }))
+        analysis: None,
+    };
+
+    let analysis_patch = display_patch.or_else(|| merge_patches_for_display(&ordered));
+    if let Some(patch) = analysis_patch {
+        let mut analysis_input = merged.clone();
+        analysis_input.patch = Some(patch);
+        analysis_input.before = wc_before;
+        merged.analysis = analyze_file_change(&analysis_input);
+    }
+
+    Ok(Some(merged))
 }
 
 fn infer_net_kind(before_exists: bool, after_exists: bool) -> FileChangeKind {
@@ -672,6 +686,7 @@ mod tests {
                 source_ref: Some("svn:50545".into()),
                 patch: Some(add_rows.into()),
                 conflict_risk: None,
+                analysis: None,
             },
             FileChange {
                 path: "/trunk/a.html".into(),
@@ -684,6 +699,7 @@ mod tests {
                 source_ref: Some("svn:50556".into()),
                 patch: Some(remove_style.into()),
                 conflict_risk: None,
+                analysis: None,
             },
         ];
         let source_refs = vec!["svn:50557".into(), "svn:50556".into(), "svn:50545".into()];
@@ -745,6 +761,7 @@ mod tests {
             source_ref: Some("svn:50556".into()),
             patch: Some(patch),
             conflict_risk: None,
+            analysis: None,
         }];
         let wc_root =
             std::env::temp_dir().join(format!("copy-diff-ctx-fail-test-{}", std::process::id()));

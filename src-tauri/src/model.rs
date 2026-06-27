@@ -46,6 +46,49 @@ pub enum ConflictRisk {
     High,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationStatus {
+    Exact,
+    ContextDrift,
+    MultipleCandidates,
+    NotFound,
+    AlreadyContains,
+    SameRegionConflict,
+    FileMissing,
+    PathUnmapped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchMethod {
+    OldBlock,
+    Context,
+    Fuzzy,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeStatus {
+    AutoApply,
+    KeepTarget,
+    AutoMerge,
+    Conflict,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeAnalysis {
+    pub target_path: Option<String>,
+    pub location_status: LocationStatus,
+    pub match_method: MatchMethod,
+    pub confidence: f32,
+    pub candidate_count: usize,
+    pub merge_status: MergeStatus,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileChange {
     /// Source-side path (before mapping)
@@ -66,6 +109,8 @@ pub struct FileChange {
     /// Raw unified diff hunk (text files only)
     pub patch: Option<String>,
     pub conflict_risk: Option<ConflictRisk>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<ChangeAnalysis>,
 }
 
 // ---------------------------------------------------------------------------

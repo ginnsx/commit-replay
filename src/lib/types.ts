@@ -81,6 +81,20 @@ export type IntegrationStatus = "auto_ok" | "review" | "blocked";
 
 export type IntegrationStrategy = "skip" | "apply_patch" | "write_after" | "manual_merge";
 
+export type LocationStatus =
+  | "exact"
+  | "context_drift"
+  | "multiple_candidates"
+  | "not_found"
+  | "already_contains"
+  | "same_region_conflict"
+  | "file_missing"
+  | "path_unmapped";
+
+export type MatchMethod = "old_block" | "context" | "fuzzy" | "none";
+
+export type MergeStatus = "auto_apply" | "keep_target" | "auto_merge" | "conflict" | "skip";
+
 export interface IntegrationItemView {
   id: string;
   path: string;
@@ -89,6 +103,11 @@ export interface IntegrationItemView {
   strategy: IntegrationStrategy;
   reason: string;
   overlapLines?: [number, number];
+  locationStatus?: LocationStatus;
+  mergeStatus?: MergeStatus;
+  matchMethod?: MatchMethod;
+  confidence?: number;
+  candidateCount?: number;
   before: string[];
   after: string[];
   diff: DiffLine[];
@@ -185,6 +204,15 @@ export interface FileChange {
   after: string | null;
   patch: string | null;
   conflict_risk: "low" | "high" | null;
+  analysis?: {
+    target_path: string | null;
+    location_status: LocationStatus;
+    match_method: MatchMethod;
+    confidence: number;
+    candidate_count: number;
+    merge_status: MergeStatus;
+    reason: string;
+  };
 }
 
 export interface PreviewResult {

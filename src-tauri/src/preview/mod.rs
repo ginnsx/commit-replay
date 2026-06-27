@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod change_analysis;
 pub mod git_wc;
 pub mod integration;
 pub mod patch_apply;
