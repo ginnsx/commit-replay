@@ -19,11 +19,12 @@ pub struct GitWriter {
 
 impl GitWriter {
     fn run_git(&self, args: &[&str]) -> Result<String> {
-        let output = crate::process::command("git")
-            .current_dir(&self.repo_path)
-            .args(args)
-            .output()
-            .map_err(|e| AppError::Vcs(format!("failed to spawn git: {e}")))?;
+        let output = crate::process::output(
+            crate::process::command("git")
+                .current_dir(&self.repo_path)
+                .args(args),
+        )
+        .map_err(|e| AppError::Vcs(format!("failed to spawn git: {e}")))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if output.status.success() {
@@ -50,6 +51,13 @@ impl GitWriter {
             std::fs::remove_file(path)?;
         }
         Ok(())
+    }
+
+    fn write_rename_after(&self, fc: &FileChange, target: &str, after: &str) -> Result<()> {
+        if let Some(old_path) = fc.old_path.as_deref().filter(|old| *old != target) {
+            self.delete_file(old_path)?;
+        }
+        self.write_file(target, after)
     }
 
     fn apply_patch(&self, fc: &FileChange) -> Result<()> {
@@ -80,10 +88,17 @@ impl GitWriter {
                 .write_all(full_patch.as_bytes())
                 .map_err(|e| AppError::Vcs(format!("git apply stdin: {e}")))?;
         }
-        let out = child
-            .wait_with_output()
+        let out = crate::process::wait_with_output(child)
             .map_err(|e| AppError::Vcs(format!("git apply wait: {e}")))?;
         if out.status.success() {
+            if let Some(after) = fc.after.as_ref() {
+                let path = resolve_wc_path(&self.repo_path, target);
+                if let Ok(current) = std::fs::read_to_string(&path) {
+                    if equivalent_text(&current, after) {
+                        self.write_file(target, after)?;
+                    }
+                }
+            }
             return Ok(());
         }
         Err(AppError::Apply(format!(
@@ -124,9 +139,16 @@ impl GitWriter {
             IntegrationStrategy::ApplyPatch => self.apply_patch_only(fc),
             IntegrationStrategy::WriteAfter => match fc.kind {
                 FileChangeKind::Delete => self.delete_file(target),
-                FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+                FileChangeKind::Add | FileChangeKind::Modify => {
                     if let Some(after) = fc.after.as_ref() {
                         self.write_file(target, after)
+                    } else {
+                        Ok(())
+                    }
+                }
+                FileChangeKind::Rename => {
+                    if let Some(after) = fc.after.as_ref() {
+                        self.write_rename_after(fc, target, after)
                     } else {
                         Ok(())
                     }
@@ -143,23 +165,42 @@ impl GitWriter {
     }
 
     fn apply_patch_only(&self, fc: &FileChange) -> Result<()> {
-        if fc.patch.is_some() {
-            return self.apply_patch(fc);
-        }
         let target = fc
             .target_path
             .as_deref()
             .ok_or_else(|| AppError::Mapping("missing target_path".into()))?;
         match fc.kind {
             FileChangeKind::Delete => self.delete_file(target),
-            FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+            FileChangeKind::Add => {
                 if let Some(after) = fc.after.as_ref() {
                     self.write_file(target, after)
                 } else {
                     Ok(())
                 }
             }
-            FileChangeKind::Binary => Ok(()),
+            FileChangeKind::Modify => {
+                if fc.patch.is_some() {
+                    self.apply_patch(fc)
+                } else if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Rename => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_rename_after(fc, target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Binary => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -169,11 +210,29 @@ impl GitWriter {
             .as_deref()
             .ok_or_else(|| AppError::Mapping("missing target_path".into()))?;
         match fc.kind {
-            FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+            FileChangeKind::Add => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else if fc.patch.is_some() {
+                    self.apply_patch_with_fallback(fc)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Modify => {
                 if fc.patch.is_some() {
                     self.apply_patch_with_fallback(fc)
                 } else if let Some(after) = fc.after.as_ref() {
                     self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Rename => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_rename_after(fc, target, after)
+                } else if fc.patch.is_some() {
+                    self.apply_patch_with_fallback(fc)
                 } else {
                     Ok(())
                 }
@@ -263,6 +322,11 @@ impl GitWriter {
         };
         self.commit_with_message_allow_empty(&msg)
     }
+}
+
+fn equivalent_text(a: &str, b: &str) -> bool {
+    let normalize = |s: &str| s.replace("\r\n", "\n").replace('\r', "\n");
+    normalize(a).trim_end_matches('\n') == normalize(b).trim_end_matches('\n')
 }
 
 impl VcsWriter for GitWriter {

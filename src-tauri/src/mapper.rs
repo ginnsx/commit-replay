@@ -44,6 +44,9 @@ impl Mapper {
     pub fn apply_to_files(&self, files: &mut Vec<FileChange>) -> Result<()> {
         for fc in files.iter_mut() {
             fc.target_path = Some(self.map(&fc.path)?);
+            if let Some(old_path) = fc.old_path.as_deref() {
+                fc.old_path = Some(self.map(old_path)?);
+            }
         }
         Ok(())
     }

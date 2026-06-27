@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::VcsWriter;
 use crate::{
     error::{AppError, Result},
     model::{
@@ -11,7 +12,6 @@ use crate::{
     store::models::IntegrationStrategy,
     vcs::svn::{run_svn, SvnCredentials},
 };
-use super::VcsWriter;
 
 pub struct SvnWriter {
     pub wc_path: String,
@@ -31,21 +31,69 @@ impl SvnWriter {
         run_svn(&self.wc_path, &self.creds(), args)
     }
 
+    fn run_svn_wc(&self, args: &[&str]) -> Result<String> {
+        let mut cmd = crate::process::command("svn");
+        cmd.current_dir(&self.wc_path).arg("--non-interactive");
+        if let Some(user) = &self.username {
+            cmd.arg("--username").arg(user);
+        }
+        if let Some(pass) = &self.password {
+            cmd.arg("--password").arg(pass);
+        }
+        cmd.args(args);
+        let output = crate::process::output(&mut cmd)
+            .map_err(|e| AppError::Vcs(format!("failed to spawn svn: {e}")))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if output.status.success() {
+            Ok(stdout)
+        } else {
+            Err(AppError::Vcs(format!(
+                "svn {} failed (exit {:?}): {stderr}{stdout}",
+                args.first().copied().unwrap_or(""),
+                output.status.code(),
+            )))
+        }
+    }
+
     fn write_file(&self, rel_path: &str, content: &str) -> Result<()> {
         let path = resolve_wc_path(&self.wc_path, rel_path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, content)?;
+        self.schedule_add_if_needed(rel_path)?;
         Ok(())
     }
 
     fn delete_file(&self, rel_path: &str) -> Result<()> {
         let path = resolve_wc_path(&self.wc_path, rel_path);
-        if path.is_file() {
-            std::fs::remove_file(path)?;
+        if path.exists() {
+            let arg = rel_path.replace('\\', "/");
+            if self.run_svn_wc(&["delete", "--force", &arg]).is_err() && path.is_file() {
+                std::fs::remove_file(path)?;
+            }
         }
         Ok(())
+    }
+
+    fn schedule_add_if_needed(&self, rel_path: &str) -> Result<()> {
+        let arg = rel_path.replace('\\', "/");
+        let status = self.run_svn_wc(&["status", &arg])?;
+        if status
+            .lines()
+            .any(|line| line.trim_start().starts_with('?'))
+        {
+            self.run_svn_wc(&["add", "--parents", &arg])?;
+        }
+        Ok(())
+    }
+
+    fn write_rename_after(&self, fc: &FileChange, target: &str, after: &str) -> Result<()> {
+        if let Some(old_path) = fc.old_path.as_deref().filter(|old| *old != target) {
+            self.delete_file(old_path)?;
+        }
+        self.write_file(target, after)
     }
 
     fn apply_patch(&self, fc: &FileChange) -> Result<()> {
@@ -83,7 +131,11 @@ impl SvnWriter {
         }
     }
 
-    pub fn apply_file_with_strategy(&self, fc: &FileChange, strategy: IntegrationStrategy) -> Result<()> {
+    pub fn apply_file_with_strategy(
+        &self,
+        fc: &FileChange,
+        strategy: IntegrationStrategy,
+    ) -> Result<()> {
         let target = fc
             .target_path
             .as_deref()
@@ -94,9 +146,16 @@ impl SvnWriter {
             IntegrationStrategy::ApplyPatch => self.apply_patch_only(fc),
             IntegrationStrategy::WriteAfter => match fc.kind {
                 FileChangeKind::Delete => self.delete_file(target),
-                FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+                FileChangeKind::Add | FileChangeKind::Modify => {
                     if let Some(after) = fc.after.as_ref() {
                         self.write_file(target, after)
+                    } else {
+                        Ok(())
+                    }
+                }
+                FileChangeKind::Rename => {
+                    if let Some(after) = fc.after.as_ref() {
+                        self.write_rename_after(fc, target, after)
                     } else {
                         Ok(())
                     }
@@ -113,23 +172,42 @@ impl SvnWriter {
     }
 
     fn apply_patch_only(&self, fc: &FileChange) -> Result<()> {
-        if fc.patch.is_some() {
-            return self.apply_patch(fc);
-        }
         let target = fc
             .target_path
             .as_deref()
             .ok_or_else(|| AppError::Mapping("missing target_path".into()))?;
         match fc.kind {
             FileChangeKind::Delete => self.delete_file(target),
-            FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+            FileChangeKind::Add => {
                 if let Some(after) = fc.after.as_ref() {
                     self.write_file(target, after)
                 } else {
                     Ok(())
                 }
             }
-            FileChangeKind::Binary => Ok(()),
+            FileChangeKind::Modify => {
+                if fc.patch.is_some() {
+                    self.apply_patch(fc)
+                } else if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Rename => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_rename_after(fc, target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Binary => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -139,11 +217,29 @@ impl SvnWriter {
             .as_deref()
             .ok_or_else(|| AppError::Mapping("missing target_path".into()))?;
         match fc.kind {
-            FileChangeKind::Add | FileChangeKind::Modify | FileChangeKind::Rename => {
+            FileChangeKind::Add => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_file(target, after)
+                } else if fc.patch.is_some() {
+                    self.apply_patch_with_fallback(fc)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Modify => {
                 if fc.patch.is_some() {
                     self.apply_patch_with_fallback(fc)
                 } else if let Some(after) = fc.after.as_ref() {
                     self.write_file(target, after)
+                } else {
+                    Ok(())
+                }
+            }
+            FileChangeKind::Rename => {
+                if let Some(after) = fc.after.as_ref() {
+                    self.write_rename_after(fc, target, after)
+                } else if fc.patch.is_some() {
+                    self.apply_patch_with_fallback(fc)
                 } else {
                     Ok(())
                 }
@@ -177,8 +273,8 @@ impl SvnWriter {
                 .get(target)
                 .copied()
                 .unwrap_or(IntegrationStrategy::ApplyPatch);
-            if self.apply_file_with_strategy(fc, strategy).is_err() {
-                failed.push(target.to_string());
+            if let Err(err) = self.apply_file_with_strategy(fc, strategy) {
+                failed.push(format!("{target}: {err}"));
             }
         }
         if failed.is_empty() {
@@ -198,7 +294,9 @@ impl SvnWriter {
 
     pub fn commit_with_message(&self, message: &str) -> Result<String> {
         let output = self.run_svn(&["commit", "-m", message])?;
-        parse_commit_revision(&output)
+        let revision = parse_commit_revision(&output)?;
+        let _ = self.run_svn(&["update"]);
+        Ok(revision)
     }
 }
 
@@ -234,8 +332,8 @@ impl VcsWriter for SvnWriter {
                     continue;
                 }
             };
-            if self.apply_file_default(fc).is_err() {
-                failed.push(target.to_string());
+            if let Err(err) = self.apply_file_default(fc) {
+                failed.push(format!("{target}: {err}"));
             }
         }
         if failed.is_empty() {

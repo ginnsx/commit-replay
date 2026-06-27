@@ -66,8 +66,7 @@ fn run_git_apply_check(
             .map_err(|e| AppError::Vcs(format!("git apply stdin: {e}")))?;
     }
 
-    let out = child
-        .wait_with_output()
+    let out = crate::process::wait_with_output(child)
         .map_err(|e| AppError::Vcs(format!("git apply wait: {e}")))?;
 
     Ok(out.status.success())
@@ -96,8 +95,13 @@ pub fn derive_after(
 fn apply_patch_or_lines(
     before: Option<&str>,
     patch: &str,
-    _source_after: Option<&str>,
+    source_after: Option<&str>,
 ) -> Result<String> {
+    if before.is_none() {
+        if let Some(source_after) = source_after {
+            return Ok(source_after.to_string());
+        }
+    }
     let expected_new = super::patch_apply::reconstruct_new_from_patch(patch);
     let old = super::patch_apply::reconstruct_old_from_patch(patch);
 
@@ -105,14 +109,30 @@ fn apply_patch_or_lines(
         return Ok(expected_new);
     }
     if before.is_some_and(|b| normalize_lines(b) == normalize_lines(&old)) {
-        return super::patch_apply::apply_unified_patch(before, patch);
+        let next = super::patch_apply::apply_unified_patch(before, patch)?;
+        if let Some(source_after) = source_after {
+            if equivalent_text(&next, source_after) {
+                return Ok(source_after.to_string());
+            }
+        }
+        return Ok(next);
     }
     if let Ok(next) = super::patch_apply::apply_unified_patch(before, patch) {
+        if let Some(source_after) = source_after {
+            if equivalent_text(&next, source_after) {
+                return Ok(source_after.to_string());
+            }
+        }
         return Ok(next);
     }
     if let Some(b) = before {
         if let Ok(next) = super::patch_apply::apply_unified_patch_by_search(b, patch) {
             if normalize_lines(&next) != normalize_lines(b) {
+                if let Some(source_after) = source_after {
+                    if equivalent_text(&next, source_after) {
+                        return Ok(source_after.to_string());
+                    }
+                }
                 return Ok(next);
             }
         }
@@ -122,6 +142,10 @@ fn apply_patch_or_lines(
 
 fn normalize_lines(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn equivalent_text(a: &str, b: &str) -> bool {
+    normalize_lines(a).trim_end_matches('\n') == normalize_lines(b).trim_end_matches('\n')
 }
 
 #[cfg(test)]

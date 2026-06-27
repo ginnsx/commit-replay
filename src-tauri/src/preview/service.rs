@@ -334,6 +334,11 @@ fn content_equal(a: Option<&str>, b: Option<&str>) -> bool {
     normalize_content(a.unwrap_or("")) == normalize_content(b.unwrap_or(""))
 }
 
+fn content_equivalent_ignoring_final_newline(a: Option<&str>, b: Option<&str>) -> bool {
+    normalize_content(a.unwrap_or("")).trim_end_matches('\n')
+        == normalize_content(b.unwrap_or("")).trim_end_matches('\n')
+}
+
 fn has_net_change(kind: &FileChangeKind, before: Option<&str>, after: Option<&str>) -> bool {
     if content_equal(before, after) {
         return false;
@@ -522,7 +527,7 @@ fn merge_file_changes_for_preview(
         .iter()
         .filter_map(|fc| fc.patch.as_deref())
         .collect();
-    let after_content = if merge_context_ok {
+    let mut after_content = if merge_context_ok {
         target_merged.clone()
     } else if let Some(before) = wc_before.as_deref() {
         resolve_target_after(before, display_patch.as_deref(), &patch_list)
@@ -530,6 +535,15 @@ fn merge_file_changes_for_preview(
     } else {
         target_merged.clone()
     };
+    if merge_context_ok
+        && latest.source_after.is_some()
+        && content_equivalent_ignoring_final_newline(
+            after_content.as_deref(),
+            latest.source_after.as_deref(),
+        )
+    {
+        after_content = latest.source_after.clone();
+    }
 
     let kind = infer_net_kind(wc_before.is_some(), after_content.is_some());
     let visible = if merge_context_ok {
@@ -549,7 +563,7 @@ fn merge_file_changes_for_preview(
         old_path: first.old_path.clone(),
         before: wc_before,
         after: after_content,
-        source_after: None,
+        source_after: latest.source_after.clone(),
         source_ref: None,
         patch: display_patch,
         conflict_risk: Some(conflict_risk),
