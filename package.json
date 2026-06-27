@@ -15,6 +15,8 @@
     "test:regression:smoke": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite smoke",
     "test:regression:safety": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite production-safety",
     "test:regression:release": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite release",
+    "test:regression:ui": "powershell -ExecutionPolicy Bypass -File scripts/regression/run-regression.ps1 -Suite ui-smoke",
+    "test:regression:all": "npm run test:regression:release && npm run test:regression:ui",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",

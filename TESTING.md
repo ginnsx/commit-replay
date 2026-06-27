@@ -14,14 +14,18 @@ cd src-tauri && cargo test
 # 前端监听模式
 npm run test:watch
 
-# Git -> Git 黑盒自动回归（临时仓库 + 文件哈希/提交数校验）
+# 黑盒自动回归（本地临时 Git/SVN 仓库 + 文件哈希/提交数/回滚校验）
 npm run test:regression:smoke
 npm run test:regression:safety
 npm run test:regression:release
+npm run test:regression:ui
+npm run test:regression:all
 
-# 可选：对真实 SVN 仓库做集成测试（需网络与凭据）
+# 可选：对真实远程 SVN 仓库做集成测试（需网络与凭据）
 npm run test:integration
 ```
+
+`test:regression:release` 使用 `svnadmin` 和 `svn checkout file://...` 创建本地 SVN 仓库，不访问网络；缺少 SVN 工具时 SVN case 会记录为 skipped。正式 release 环境应安装 SVN 工具并要求 SVN case 零 skipped。
 
 ---
 
