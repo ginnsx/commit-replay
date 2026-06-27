@@ -175,7 +175,7 @@ npm test && npm run lint && npm run format:check
 cd src-tauri && cargo test && cargo clippy
 ```
 
-测试分层与 SVN 集成测试说明见 [TESTING.md](TESTING.md)。
+测试分层、自动回归、SVN 集成测试与验收测试说明见 [TESTING.md](TESTING.md)。
 
 ---
 
@@ -183,60 +183,102 @@ cd src-tauri && cargo test && cargo clippy
 
 ```
 copy-diff/
-├── src/                              # React 前端
-│   ├── App.tsx                       # 根组件（五步向导 + 设置页）
-│   ├── main.tsx                      # 入口
-│   ├── styles/relay.css              # 应用样式
-│   ├── lib/
-│   │   ├── types.ts                  # 与 Rust store/models 对齐的 TS 类型
-│   │   ├── invoke.ts                 # 封装所有 tauri::command 调用
-│   │   ├── constants.ts              # 向导步骤、默认映射等
-│   │   └── types.test.ts
+├── src/                                # React + TypeScript 前端
+│   ├── App.tsx                         # 根组件（五步向导 + 设置页）
+│   ├── main.tsx                        # 前端入口
+│   ├── vite-env.d.ts                   # Vite 类型声明
+│   ├── assets/                         # 前端静态资源
+│   ├── styles/
+│   │   └── relay.css                   # 应用主样式
+│   ├── lib/                            # 前端基础封装
+│   │   ├── constants.ts                # 向导步骤、默认映射等常量
+│   │   ├── invoke.ts                   # Tauri command 调用封装
+│   │   ├── types.ts                    # 与 Rust 侧对齐的 TS 类型
+│   │   └── types.test.ts               # 类型/工具回归测试
 │   ├── components/
-│   │   ├── relay/                    # 向导 UI 组件
-│   │   │   ├── StepRail.tsx          # 左侧步骤导航
-│   │   │   ├── CommitPicker.tsx      # 提交多选列表
-│   │   │   ├── FileTree.tsx          # 预览文件树
-│   │   │   ├── DiffView.tsx          # 虚拟滚动 diff 视图
-│   │   │   ├── ConflictWorkspace.tsx # 集成计划 / 冲突处理
-│   │   │   ├── PathMappingPanel.tsx  # 路径映射配置
-│   │   │   └── …
-│   │   └── settings/                 # 设置页（仓库、编辑器、迁移历史）
-│   └── test/setup.ts
+│   │   ├── relay/                      # 提交迁移主流程组件
+│   │   │   ├── TitleBar.tsx            # 顶部栏
+│   │   │   ├── StepRail.tsx            # 左侧步骤导航
+│   │   │   ├── RepoModal.tsx           # 仓库选择/编辑弹窗
+│   │   │   ├── RepoCard.tsx            # 仓库卡片
+│   │   │   ├── CommitPicker.tsx        # 提交多选列表
+│   │   │   ├── CommitRow.tsx           # 单条提交行
+│   │   │   ├── PathMappingPanel.tsx    # 路径映射配置
+│   │   │   ├── FileTree.tsx            # 预览文件树
+│   │   │   ├── DiffView.tsx            # 虚拟滚动 diff 视图
+│   │   │   ├── IntegrationFileList.tsx # 集成计划文件列表
+│   │   │   ├── ConflictWorkspace.tsx   # 冲突/待确认处理区
+│   │   │   ├── BottomBar.tsx           # 底部操作栏
+│   │   │   ├── Badges.tsx              # 状态标签
+│   │   │   ├── Toast.tsx               # 轻提示
+│   │   │   └── icons.tsx               # UI 图标
+│   │   └── settings/                   # 设置页组件
+│   │       ├── SettingsPanels.tsx      # 仓库、编辑器等设置面板
+│   │       └── MigrationHistory.tsx    # 迁移历史
+│   └── test/
+│       └── setup.ts                    # Vitest / Testing Library 初始化
 │
-├── src-tauri/                        # Rust / Tauri 后端
-│   ├── src/
-│   │   ├── main.rs                   # 二进制入口
-│   │   ├── lib.rs                    # 注册 plugins 与 invoke_handler
-│   │   ├── model.rs                  # VCS 无关核心模型（ChangeSet, FileChange…）
-│   │   ├── error.rs                  # AppError
-│   │   ├── mapper.rs                 # 路径映射
-│   │   ├── relay.rs                  # FileChange → FileChangeView 转换
-│   │   ├── diff/                     # 行级 diff 计算
-│   │   ├── preview/                  # 预览服务、集成计划、缓存
-│   │   ├── store/                    # SQLite 持久化
-│   │   │   ├── db.rs                 # 数据库操作
-│   │   │   ├── models.rs             # 前后端共享的视图模型
-│   │   │   └── crypto.rs             # SVN 密码加密
-│   │   ├── commands/
-│   │   │   ├── settings.rs           # relay_* 仓库/编辑器/迁移记录
-│   │   │   ├── reader.rs             # list_repo_commits, 路径映射
-│   │   │   ├── preview.rs            # build_preview_meta, get_file_diff, 集成计划
-│   │   │   ├── migrate.rs            # execute_migration
-│   │   │   └── writer.rs             # open_file_in_editor
-│   │   └── vcs/                      # VCS 适配器
-│   │       ├── factory.rs            # SourceReader / MigrationWriter 工厂
-│   │       ├── svn_reader.rs / git_reader.rs
-│   │       ├── git_writer.rs / svn_writer.rs
-│   │       └── svn/                  # SVN CLI 解析子模块
+├── src-tauri/                          # Rust / Tauri 后端
+│   ├── Cargo.toml                      # Rust crate 配置与依赖
+│   ├── Cargo.lock                      # Rust 依赖锁定
+│   ├── tauri.conf.json                 # Tauri 应用、窗口、权限配置
+│   ├── build.rs                        # Tauri 构建脚本
+│   ├── rustfmt.toml                    # Rust 格式化配置
 │   ├── capabilities/
-│   ├── tauri.conf.json
-│   └── Cargo.toml
+│   │   └── default.json                # Tauri capability 权限
+│   ├── icons/                          # 应用图标
+│   ├── tests/
+│   │   ├── svn_integration.rs          # SVN 集成测试
+│   │   └── fixtures/                   # SVN diff / log 测试夹具
+│   └── src/
+│       ├── main.rs                     # 桌面二进制入口
+│       ├── lib.rs                      # 注册插件与 invoke_handler
+│       ├── error.rs                    # AppError 与统一错误序列化
+│       ├── model.rs                    # VCS 无关核心模型（ChangeSet、FileChange 等）
+│       ├── mapper.rs                   # 路径映射
+│       ├── process.rs                  # 外部进程执行封装
+│       ├── relay.rs                    # FileChange 到前端视图的转换
+│       ├── bin/
+│       │   └── regression_runner.rs    # 回归测试命令行 runner
+│       ├── commands/                   # 暴露给前端的 Tauri commands
+│       │   ├── mod.rs                  # command 模块出口
+│       │   ├── settings.rs             # 仓库、编辑器、迁移记录设置
+│       │   ├── reader.rs               # 提交列表、仓库探测、路径映射读取
+│       │   ├── preview.rs              # 预览元数据、文件 diff、集成计划
+│       │   ├── migrate.rs              # execute_migration
+│       │   └── writer.rs               # 外部编辑器打开等写侧辅助
+│       ├── diff/                       # 行级 diff 计算
+│       ├── preview/                    # 预览服务、缓存、patch apply、目标工作区分析
+│       ├── store/                      # SQLite 持久化与共享视图模型
+│       │   ├── db.rs                   # 数据库操作
+│       │   ├── models.rs               # 前后端共享视图模型
+│       │   ├── crypto.rs               # SVN 密码加密
+│       │   └── editor_paths.rs         # 外部编辑器路径管理
+│       └── vcs/                        # Git / SVN 适配器
+│           ├── mod.rs                  # VCS trait 与公共类型
+│           ├── factory.rs              # reader / writer 工厂
+│           ├── git_probe.rs            # Git 仓库探测
+│           ├── git_reader.rs           # Git 提交读取
+│           ├── git_writer.rs           # Git 迁移写入
+│           ├── svn_reader.rs           # SVN 提交读取
+│           ├── svn_writer.rs           # SVN 迁移写入
+│           ├── git/                    # Git log / ref 工具
+│           └── svn/                    # SVN CLI、diff/log/info 解析
 │
-├── eslint.config.js
-├── vite.config.ts
-├── rust-toolchain.toml
-└── package.json
+├── docs/                               # 测试与回归自动化设计文档
+├── scripts/
+│   ├── extract-relay-css.mjs           # 从设计稿提取 relay 样式的辅助脚本
+│   └── regression/run-regression.ps1   # 回归套件入口脚本
+├── designs/commit-relay/               # Commit Relay 原型与需求材料
+├── public/                             # Vite public 静态资源
+├── TESTING.md                          # 测试分层与运行说明
+├── package.json                        # npm scripts 与前端依赖
+├── package-lock.json                   # npm 依赖锁定
+├── vite.config.ts                      # Vite 配置
+├── tsconfig.json                       # TypeScript 应用配置
+├── tsconfig.node.json                  # TypeScript Node/Vite 配置
+├── eslint.config.js                    # ESLint 配置
+└── rust-toolchain.toml                 # Rust MSVC 工具链固定
 ```
 
 ---

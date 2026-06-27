@@ -1,6 +1,6 @@
 # Relay 自动回归方案
 
-本文说明如何把 [`black_box_test_suite.md`](black_box_test_suite.md) 中的黑盒测试集自动化，并在失败时自动记录足够的诊断信息。
+本文说明如何把 [`TESTING.md`](../TESTING.md) 中“验收测试”章节定义的黑盒测试集自动化，并在失败时自动记录足够的诊断信息。
 
 ## 设计原则
 
