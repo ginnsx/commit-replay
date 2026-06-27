@@ -4,10 +4,7 @@ use crate::{
     vcs::svn::parse_unified_diff,
 };
 
-use super::git::{
-    log_parser::parse_git_log,
-    ref_util::parse_git_revision,
-};
+use super::git::{log_parser::parse_git_log, ref_util::parse_git_revision};
 use super::svn_reader::tag_source_ref;
 use super::VcsReader;
 
@@ -18,11 +15,14 @@ pub struct GitReader {
 
 impl GitReader {
     fn run_git(&self, args: &[&str]) -> Result<String> {
-        let output = crate::process::command("git")
-            .current_dir(&self.repo_path)
-            .args(args)
-            .output()
-            .map_err(|e| AppError::Vcs(format!("failed to spawn git: {e}")))?;
+        let mut git_args = vec!["-c", "core.quotePath=false"];
+        git_args.extend_from_slice(args);
+        let output = crate::process::output(
+            crate::process::command("git")
+                .current_dir(&self.repo_path)
+                .args(&git_args),
+        )
+        .map_err(|e| AppError::Vcs(format!("failed to spawn git: {e}")))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if output.status.success() {
@@ -105,9 +105,16 @@ pub fn load_changeset_with_meta(reader: &GitReader, meta: ReplayUnitMeta) -> Res
     tag_source_ref(&mut files, &meta.source_ref);
 
     for fc in &mut files {
-        if fc.kind == crate::model::FileChangeKind::Binary {
-            if let Ok(bytes) = reader.run_git(&["show", &format!("{sha}:{}", fc.path)]) {
-                fc.after = Some(bytes);
+        if !matches!(fc.kind, crate::model::FileChangeKind::Delete) {
+            let blob_path = fc.path.trim_start_matches('/');
+            if let Ok(content) = reader.run_git(&["show", &format!("{sha}:{blob_path}")]) {
+                fc.source_after = Some(content.clone());
+                if fc.kind == crate::model::FileChangeKind::Binary
+                    || (fc.kind == crate::model::FileChangeKind::Add && fc.patch.is_none())
+                    || (fc.kind == crate::model::FileChangeKind::Rename && fc.patch.is_none())
+                {
+                    fc.after = Some(content);
+                }
             }
         }
     }

@@ -100,6 +100,43 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
         }
 
         if line.starts_with("diff --git ") {
+            flush(
+                &mut files,
+                &mut current_index_path,
+                &mut current_patch,
+                &mut old_path,
+                &mut new_path,
+                &mut is_binary,
+            );
+            if let Some((old, new)) = parse_git_diff_header(line) {
+                old_path = Some(old);
+                new_path = Some(new);
+            }
+            continue;
+        }
+
+        if line.starts_with("rename from ") {
+            old_path = Some(line["rename from ".len()..].trim().to_string());
+            continue;
+        }
+
+        if line.starts_with("rename to ") {
+            new_path = Some(line["rename to ".len()..].trim().to_string());
+            continue;
+        }
+
+        if line.starts_with("new file mode ") {
+            old_path = Some("/dev/null".into());
+            continue;
+        }
+
+        if line.starts_with("deleted file mode ") {
+            new_path = Some("/dev/null".into());
+            continue;
+        }
+
+        if line.starts_with("Binary files ") {
+            is_binary = true;
             continue;
         }
 
@@ -107,7 +144,7 @@ pub fn parse_unified_diff(diff: &str, wc_root: Option<&str>) -> Result<Vec<FileC
             continue;
         }
 
-        if line.starts_with("@@") || !line.is_empty() || !current_patch.is_empty() {
+        if line.starts_with("@@") || !current_patch.is_empty() {
             if old_path.is_some() || new_path.is_some() || current_index_path.is_some() {
                 current_patch.push_str(line);
                 current_patch.push('\n');
@@ -131,6 +168,14 @@ fn parse_diff_path_line(line: &str, prefix: &str) -> String {
     let rest = line.strip_prefix(prefix).unwrap_or(line).trim();
     let path = rest.split('\t').next().unwrap_or(rest).trim();
     strip_git_diff_prefix(path).to_string()
+}
+
+fn parse_git_diff_header(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("diff --git ")?;
+    let mut parts = rest.split_whitespace();
+    let old = strip_git_diff_prefix(parts.next()?).to_string();
+    let new = strip_git_diff_prefix(parts.next()?).to_string();
+    Some((old, new))
 }
 
 fn strip_git_diff_prefix(path: &str) -> &str {
@@ -187,6 +232,13 @@ fn infer_kind(
     patch: &str,
     wc_root: Option<&str>,
 ) -> FileChangeKind {
+    if old == Some("/dev/null") {
+        return FileChangeKind::Add;
+    }
+    if new == Some("/dev/null") {
+        return FileChangeKind::Delete;
+    }
+
     if let Some(hunk) = patch.lines().find(|l| l.starts_with("@@")) {
         if hunk.contains("-0,0") || hunk.starts_with("@@ -0,") {
             return FileChangeKind::Add;
@@ -289,5 +341,46 @@ mod tests {
         let files = parse_unified_diff(diff, Some("C:\\wc\\project")).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "/src/main.rs");
+    }
+
+    #[test]
+    fn parses_git_pure_rename() {
+        let diff = "diff --git a/src/move_me.txt b/moved/move_me.txt\n\
+similarity index 100%\n\
+rename from src/move_me.txt\n\
+rename to moved/move_me.txt\n";
+        let files = parse_unified_diff(diff, Some("C:\\repo")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/moved/move_me.txt");
+        assert_eq!(files[0].old_path.as_deref(), Some("/src/move_me.txt"));
+        assert_eq!(files[0].kind, FileChangeKind::Rename);
+        assert!(files[0].patch.is_none());
+    }
+
+    #[test]
+    fn parses_git_binary_add() {
+        let diff = "diff --git a/assets/blob.bin b/assets/blob.bin\n\
+new file mode 100644\n\
+index 0000000..67baa4c\n\
+Binary files /dev/null and b/assets/blob.bin differ\n";
+        let files = parse_unified_diff(diff, Some("C:\\repo")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/assets/blob.bin");
+        assert_eq!(files[0].kind, FileChangeKind::Binary);
+        assert!(files[0].patch.is_none());
+    }
+
+    #[test]
+    fn parses_git_empty_file_add() {
+        let diff = "diff --git a/src/empty.txt b/src/empty.txt\n\
+new file mode 100644\n\
+index 0000000..e69de29\n\
+--- /dev/null\n\
++++ b/src/empty.txt\n";
+        let files = parse_unified_diff(diff, Some("C:\\repo")).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "/src/empty.txt");
+        assert_eq!(files[0].kind, FileChangeKind::Add);
+        assert!(files[0].patch.is_none());
     }
 }

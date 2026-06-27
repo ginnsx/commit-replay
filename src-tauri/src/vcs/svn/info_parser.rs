@@ -25,6 +25,9 @@ struct InfoEntry {
 /// Last path segment of SVN `relative-url` (e.g. `^/.../hk` → `hk`).
 pub fn branch_from_relative_url(relative_url: &str) -> Option<String> {
     let path = relative_url.strip_prefix('^')?.trim_start_matches('/');
+    if path.trim().is_empty() {
+        return Some("trunk".into());
+    }
     let segment = path.rsplit('/').next()?.trim();
     if segment.is_empty() {
         None
@@ -34,11 +37,10 @@ pub fn branch_from_relative_url(relative_url: &str) -> Option<String> {
 }
 
 pub fn parse_info_xml(xml: &str) -> Result<SvnWcInfo> {
-    let root: InfoRoot = from_str(xml)
-        .map_err(|e| AppError::Vcs(format!("failed to parse svn info XML: {e}")))?;
-    let branch = branch_from_relative_url(&root.entry.relative_url).ok_or_else(|| {
-        AppError::Vcs("cannot detect checkout directory from svn info".into())
-    })?;
+    let root: InfoRoot =
+        from_str(xml).map_err(|e| AppError::Vcs(format!("failed to parse svn info XML: {e}")))?;
+    let branch = branch_from_relative_url(&root.entry.relative_url)
+        .ok_or_else(|| AppError::Vcs("cannot detect checkout directory from svn info".into()))?;
     Ok(SvnWcInfo {
         branch,
         relative_url: root.entry.relative_url,
@@ -56,6 +58,10 @@ mod tests {
             branch_from_relative_url("^/01IT项目/01开发项目/18IMS系统/hk").as_deref(),
             Some("hk")
         );
-        assert_eq!(branch_from_relative_url("^/trunk").as_deref(), Some("trunk"));
+        assert_eq!(
+            branch_from_relative_url("^/trunk").as_deref(),
+            Some("trunk")
+        );
+        assert_eq!(branch_from_relative_url("^/").as_deref(), Some("trunk"));
     }
 }

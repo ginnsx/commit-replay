@@ -108,11 +108,14 @@ fn should_finalize_path(
     strategy: IntegrationStrategy,
     resolved_blocked: &[String],
     squash_commits: bool,
+    migration_mode: MigrationMode,
 ) -> bool {
     if effective_strategy(path, strategy, resolved_blocked) != IntegrationStrategy::WriteAfter {
         return false;
     }
-    squash_commits || resolved_blocked.iter().any(|id| id == path)
+    squash_commits
+        || migration_mode == MigrationMode::CommitResult
+        || resolved_blocked.iter().any(|id| id == path)
 }
 
 fn effective_strategy(
@@ -269,7 +272,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         .filter(|fc| {
             fc.target_path.as_ref().is_some_and(|tp| {
                 strategies.get(tp).is_some_and(|s| {
-                    should_finalize_path(tp, *s, &resolved_blocked, squash_commits)
+                    should_finalize_path(tp, *s, &resolved_blocked, squash_commits, migration_mode)
                 })
             })
         })
