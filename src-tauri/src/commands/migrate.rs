@@ -78,6 +78,22 @@ fn unit_apply_strategy(
     }
 }
 
+fn unit_has_applicable_changes(
+    unit: &crate::model::PreviewUnit,
+    strategies: &std::collections::HashMap<String, IntegrationStrategy>,
+) -> bool {
+    unit.files.iter().any(|fc| {
+        let Some(target_path) = fc.target_path.as_deref() else {
+            return true;
+        };
+        strategies
+            .get(target_path)
+            .copied()
+            .unwrap_or(IntegrationStrategy::ApplyPatch)
+            != IntegrationStrategy::Skip
+    })
+}
+
 fn prepare_finalize_file(
     fc: &crate::model::FileChange,
     resolved_blocked: &[String],
@@ -243,6 +259,9 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
                 ))
             })
             .collect();
+        if !unit_has_applicable_changes(unit, &unit_strategies) {
+            continue;
+        }
         let apply = writer.apply_changeset_with_strategies(
             &crate::model::ChangeSet {
                 meta: unit.meta.clone(),

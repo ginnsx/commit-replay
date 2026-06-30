@@ -212,6 +212,24 @@ export async function buildPreviewMeta(
   };
 }
 
+export async function buildSourcePreviewMeta(
+  sourceId: string,
+  sourceRefs: string[],
+): Promise<PreviewMetaResult> {
+  const r = await invoke<Record<string, unknown>>("build_source_preview_meta", {
+    sourceId,
+    sourceRefs,
+  });
+  return {
+    files: (r.files as FileChangeView[]) ?? [],
+    adds: Number(r.adds),
+    mods: Number(r.mods),
+    dels: Number(r.dels),
+    totalAdditions: Number(r.total_additions),
+    totalDeletions: Number(r.total_deletions),
+  };
+}
+
 export async function getFileDiff(
   sourceId: string,
   targetId: string,

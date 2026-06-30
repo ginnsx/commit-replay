@@ -14,7 +14,7 @@ import type {
 } from "./lib/types";
 import { STEPS, COMMIT_FETCH_SIZE, defaultMappingsForSource, targetFilePath } from "./lib/constants";
 import {
-  buildPreviewMeta,
+  buildSourcePreviewMeta,
   buildIntegrationPlan,
   deleteEditor,
   deleteRepo,
@@ -230,11 +230,6 @@ export default function App() {
     };
   }, [sourceId, targetId, source?.type, source?.branch]);
 
-  useEffect(() => {
-    if (!sourceId || !targetId) return;
-    setPreviewMeta(null);
-  }, [sourceId, targetId, customMapping, pathMappings]);
-
   const persistPairMappings = useCallback(
     (mappings: PathMapping[], custom: boolean) => {
       if (!sourceId || !targetId) return;
@@ -276,13 +271,12 @@ export default function App() {
   }, [activeFileId, previewMeta]);
 
   const loadPreview = useCallback(async () => {
-    if (!sourceId || !targetId || sourceRefs.length === 0) return;
+    if (!sourceId || sourceRefs.length === 0) return;
     setPreviewLoading(true);
     setPreviewMeta(null);
     setActiveFileId(null);
     try {
-      await validateMigrationCombo(sourceId, targetId);
-      const meta = await buildPreviewMeta(sourceId, targetId, sourceRefs, activeMappings);
+      const meta = await buildSourcePreviewMeta(sourceId, sourceRefs);
       setPreviewMeta(meta);
       if (meta.files.length > 0) {
         setActiveFileId(meta.files[0].id);
@@ -293,13 +287,13 @@ export default function App() {
     } finally {
       setPreviewLoading(false);
     }
-  }, [sourceId, targetId, sourceRefs, activeMappings]);
+  }, [sourceId, sourceRefs]);
 
   useEffect(() => {
-    if (step === "preview" && sourceId && targetId) {
+    if (step === "preview" && sourceId) {
       loadPreview();
     }
-  }, [step, sourceId, targetId, loadPreview]);
+  }, [step, sourceId, loadPreview]);
 
   const loadIntegrationPlan = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
@@ -489,6 +483,8 @@ export default function App() {
   };
 
   const toggleCommit = useCallback((id: string) => {
+    setPreviewMeta(null);
+    setActiveFileId(null);
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -498,6 +494,8 @@ export default function App() {
   }, []);
 
   const selectCommits = useCallback((ids: string[], select: boolean) => {
+    setPreviewMeta(null);
+    setActiveFileId(null);
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => {
@@ -540,7 +538,7 @@ export default function App() {
     }
     if (step === "source" && !sourceId) return "请选择一个源仓库";
     if (step === "commits") return `已选择 ${selectedCommits.size} 条提交`;
-    if (step === "preview") return `${previewMeta?.files.length ?? 0} 个文件待迁移`;
+    if (step === "preview") return `${previewMeta?.files.length ?? 0} 个源文件变更`;
     if (step === "target" && !targetId) return "请选择目标仓库";
     if (step === "target" && targetId === sourceId) return "目标不能与源相同";
     if (step === "migrate" && !canExecuteMigration) {
@@ -629,7 +627,11 @@ export default function App() {
                   key={repo.id}
                   repo={repo}
                   selected={sourceId === repo.id}
-                  onClick={() => setSourceId(repo.id)}
+                  onClick={() => {
+                    setSourceId(repo.id);
+                    setPreviewMeta(null);
+                    setActiveFileId(null);
+                  }}
                 />
               ))}
             </div>
@@ -682,7 +684,7 @@ export default function App() {
           <div className="main-header">
             <div>
               <h1>变更预览</h1>
-              <p>{selectedCommits.size} 条提交 · 合并后净变更</p>
+              <p>{selectedCommits.size} 条提交 · 源提交 base -&gt; after 净变更</p>
             </div>
           </div>
           <div className="main-content">
@@ -708,11 +710,11 @@ export default function App() {
             <div className="preview-layout">
               {previewLoading ? (
                 <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                  <p>正在分析合并后的变更…</p>
+                  <p>正在分析所选提交的 base -&gt; after 变更…</p>
                 </div>
               ) : files.length === 0 ? (
                 <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                  <p>所选提交合并后无净变更</p>
+                  <p>所选提交 base -&gt; after 无净变更</p>
                 </div>
               ) : (
                 <>

@@ -8,7 +8,7 @@ use std::{
 
 use copy_diff_lib::{
     error::{AppError, Result as AppResult},
-    model::{ApplyStatus, ChangeSet, FileChange},
+    model::{ApplyStatus, ChangeSet, FileChange, PreviewUnit},
     preview::{
         build_integration_plan, build_preview_plan_parallel, patch_apply::resolve_target_after,
         strategy_map, MappingInput, PreviewContext,
@@ -533,6 +533,9 @@ fn relay_migrate(
                 ))
             })
             .collect::<HashMap<_, _>>();
+        if !unit_has_applicable_changes(unit, &unit_strategies) {
+            continue;
+        }
         let apply = writer
             .apply_changeset_with_strategies(
                 &ChangeSet {
@@ -662,6 +665,22 @@ fn unit_apply_strategy(
     } else {
         effective
     }
+}
+
+fn unit_has_applicable_changes(
+    unit: &PreviewUnit,
+    strategies: &HashMap<String, IntegrationStrategy>,
+) -> bool {
+    unit.files.iter().any(|fc| {
+        let Some(target_path) = fc.target_path.as_deref() else {
+            return true;
+        };
+        strategies
+            .get(target_path)
+            .copied()
+            .unwrap_or(IntegrationStrategy::ApplyPatch)
+            != IntegrationStrategy::Skip
+    })
 }
 
 fn should_finalize_path(
@@ -1883,7 +1902,7 @@ fn git_safety_cases() -> Vec<CaseSpec> {
                 vec!["C02-modify-text"],
                 BTreeMap::new(),
                 vec![],
-                1,
+                0,
             );
             c.target_setup = TargetSetup::AlreadyHasModify;
             set_unchanged(&mut c, vec!["src/existing.txt"]);
@@ -1915,7 +1934,7 @@ fn git_safety_cases() -> Vec<CaseSpec> {
                 vec!["C02-modify-text"],
                 BTreeMap::new(),
                 vec![],
-                1,
+                0,
             );
             c.target_setup = TargetSetup::AlreadyHasModify;
             set_unchanged(&mut c, vec!["src/existing.txt"]);
