@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod commit_message;
 pub mod diff;
 pub mod error;
 pub mod process;

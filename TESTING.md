@@ -225,7 +225,7 @@ artifacts/regression/<run_id>/cases/<case_id>/after/manifest.json
 | 文件集合 | 目标实际变更文件集合等于预期集合，不多不少 |
 | 文件内容 | 目标文件内容等于预期内容，文本和二进制都按 SHA256 校验 |
 | 提交数量 | 非 squash 模式下目标提交数等于实际应用的源提交数；squash 模式下等于 1 |
-| 提交信息 | 目标提交信息符合 Relay 生成规则或用户填写的 squash message |
+| 提交信息 | 每个 Relay 生成的目标提交都包含 `使用 Relay v{version} 合并`；squash 提交保留用户填写的首行 message，并在正文列出原 commit |
 | 集成计划 | review / blocked 项未处理完时不可执行迁移 |
 | 迁移记录 | 源仓库、目标仓库、提交、文件数、状态与实际执行结果一致 |
 
@@ -376,7 +376,7 @@ SVN 目标使用 `trunk/` 作为目标根时，以上路径位于 `trunk/` 下�
 | F03 | Git -> SVN 单提交 | `DS-GS` 选择 `C02` | 目标新增 1 个 SVN revision |
 | F04 | SVN -> SVN 单 revision | `DS-SS` 选择 `C02` | 目标新增 1 个 SVN revision |
 | F05 | 多提交逐条迁移 | 选择 `C01`、`C02`、`C03` | 目标提交数为 3，最终文件树符合预期 |
-| F06 | 多提交 squash | 选择 `C01`、`C02`、`C03`，开启 squash | 目标提交数为 1，commit message 为用户填写内容 |
+| F06 | 多提交 squash | 选择 `C01`、`C02`、`C03`，开启 squash | 目标提交数为 1，commit message 首行为用户填写内容，正文包含 Relay 版本和原 commit 列表 |
 | F07 | squash 未填 message | 开启 squash，message 为空 | 不允许执行 |
 | F08 | 失败回滚 | 人为制造一个执行中必失败文件 | 失败后目标回到 baseline，无半应用文件 |
 | F09 | 空净变更 | 选择 `C09` + `C10` | 不产生多余文件；提交行为需符合产品定义并稳定 |

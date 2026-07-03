@@ -7,6 +7,7 @@ use std::{
 };
 
 use copy_diff_lib::{
+    commit_message,
     error::{AppError, Result as AppResult},
     model::{ApplyStatus, ChangeSet, FileChange, PreviewUnit},
     preview::{
@@ -18,7 +19,7 @@ use copy_diff_lib::{
         CommitSnapshot, FileChangeView, IntegrationStatus, IntegrationStrategy, MigrationMode,
         MigrationRecord, RepoRecord, RepoSnapshot, RepoType,
     },
-    vcs::MigrationWriter,
+    vcs::{svn::parse_log_xml, MigrationWriter},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -554,7 +555,8 @@ fn relay_migrate(
             });
         }
         if !case.squash_commits {
-            if let Err(err) = writer.commit_allow_empty(&unit.meta, "relay: {message}") {
+            let message = commit_message::replay_message(&unit.meta);
+            if let Err(err) = writer.commit_allow_empty(&unit.meta, &message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(phase("execute", "unexpected_failure", err));
             }
@@ -611,7 +613,8 @@ fn relay_migrate(
             });
         }
         if !case.squash_commits {
-            if let Err(err) = writer.commit_with_message("relay: finalized conflicts") {
+            let message = commit_message::finalize_message();
+            if let Err(err) = writer.commit_with_message(&message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(phase("execute", "unexpected_failure", err));
             }
@@ -621,7 +624,13 @@ fn relay_migrate(
 
     if case.squash_commits {
         let msg = case.squash_message.unwrap_or("relay squash");
-        if let Err(err) = writer.commit_with_message(msg) {
+        let metas = preview
+            .units
+            .iter()
+            .map(|unit| unit.meta.clone())
+            .collect::<Vec<_>>();
+        let message = commit_message::squash_message(msg, &metas);
+        if let Err(err) = writer.commit_with_message(&message) {
             let _ = writer.rollback(&checkpoint);
             return Err(phase("execute", "unexpected_failure", err));
         }
@@ -854,10 +863,92 @@ fn verify_success(
             ),
         });
     }
+    verify_commit_messages(case, target, baseline, output, *commit_count)?;
     if case.checks_history {
         verify_history_record(case, output)?;
     }
     Ok(())
+}
+
+fn verify_commit_messages(
+    case: &CaseSpec,
+    target: &Path,
+    baseline: &str,
+    output: &MigrationOutput,
+    commit_count: usize,
+) -> std::result::Result<(), PhaseError> {
+    if commit_count == 0 {
+        return Ok(());
+    }
+    let messages = target_commit_messages(target, case.target, baseline)
+        .map_err(|e| phase("verify", "commit_message_mismatch", e))?;
+    if messages.len() != commit_count {
+        return Err(PhaseError {
+            phase: "verify",
+            error_type: "commit_message_mismatch",
+            message: format!(
+                "expected {commit_count} commit messages, got {}",
+                messages.len()
+            ),
+        });
+    }
+    let marker = commit_message::relay_marker();
+    for message in &messages {
+        if !message.contains(&marker) {
+            return Err(PhaseError {
+                phase: "verify",
+                error_type: "commit_message_mismatch",
+                message: format!("commit message missing Relay marker {marker:?}: {message:?}"),
+            });
+        }
+    }
+    if case.squash_commits {
+        let message = messages.first().ok_or_else(|| PhaseError {
+            phase: "verify",
+            error_type: "commit_message_mismatch",
+            message: "missing squash commit message".into(),
+        })?;
+        if !message.contains("原提交:") {
+            return Err(PhaseError {
+                phase: "verify",
+                error_type: "commit_message_mismatch",
+                message: "squash commit message missing original commit list".into(),
+            });
+        }
+        for commit in &output.record.commits {
+            let expected = format!(
+                "- {} {}",
+                short_record_ref(commit),
+                commit_title(&commit.msg)
+            );
+            if !message.contains(&expected) {
+                return Err(PhaseError {
+                    phase: "verify",
+                    error_type: "commit_message_mismatch",
+                    message: format!("squash commit message missing {expected:?}"),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn short_record_ref(commit: &CommitSnapshot) -> String {
+    if commit.id.starts_with("git:") {
+        format!("git:{}", commit.hash)
+    } else if commit.id.starts_with("svn:") {
+        format!("svn:{}", commit.hash)
+    } else {
+        commit.id.clone()
+    }
+}
+
+fn commit_title(message: &str) -> &str {
+    message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("无标题提交")
 }
 
 fn verify_history_record(
@@ -1474,6 +1565,34 @@ fn target_commit_count(target: &Path, vcs: VcsKind, baseline: &str) -> AppResult
             let base = baseline.parse::<usize>().unwrap_or(usize::MAX);
             let head = head.parse::<usize>().unwrap_or(usize::MAX);
             Ok(head.saturating_sub(base))
+        }
+    }
+}
+
+fn target_commit_messages(target: &Path, vcs: VcsKind, baseline: &str) -> AppResult<Vec<String>> {
+    match vcs {
+        VcsKind::Git => {
+            let range = format!("{baseline}..HEAD");
+            let output = git(target, &["log", "--reverse", "--format=%B%x1e", &range])?;
+            Ok(output
+                .split('\x1e')
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+                .map(ToOwned::to_owned)
+                .collect())
+        }
+        VcsKind::Svn => {
+            let head = target_head(target, vcs)?;
+            let base = baseline.parse::<usize>().unwrap_or(usize::MAX);
+            let head = head.parse::<usize>().unwrap_or(usize::MAX);
+            if head <= base {
+                return Ok(Vec::new());
+            }
+            let range = format!("{}:HEAD", base + 1);
+            let output = svn(target, &["log", "--xml", "-r", &range])?;
+            let mut entries = parse_log_xml(&output)?;
+            entries.reverse();
+            Ok(entries.into_iter().map(|entry| entry.message).collect())
         }
     }
 }

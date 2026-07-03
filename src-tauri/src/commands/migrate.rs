@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::{
+    commit_message,
     error::AppError,
     preview::{
         build_integration_plan, build_preview_plan_parallel, patch_apply::resolve_target_after,
@@ -277,7 +278,8 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            if let Err(err) = writer.commit_allow_empty(&unit.meta, "relay: {message}") {
+            let message = commit_message::replay_message(&unit.meta);
+            if let Err(err) = writer.commit_allow_empty(&unit.meta, &message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(err);
             }
@@ -326,7 +328,8 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            if let Err(err) = writer.commit_with_message("relay: finalized conflicts") {
+            let message = commit_message::finalize_message();
+            if let Err(err) = writer.commit_with_message(&message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(err);
             }
@@ -336,7 +339,10 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
 
     if squash_commits {
         let msg = squash_message.as_deref().expect("validated above");
-        if let Err(err) = writer.commit_with_message(msg) {
+        let metas: Vec<crate::model::ReplayUnitMeta> =
+            preview.units.iter().map(|u| u.meta.clone()).collect();
+        let message = commit_message::squash_message(msg, &metas);
+        if let Err(err) = writer.commit_with_message(&message) {
             let _ = writer.rollback(&checkpoint);
             return Err(err);
         }
