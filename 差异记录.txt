@@ -1,0 +1,226 @@
+base.less
+末尾多了一行
+  height: auto;
+}
+
+
+csEcoServiceBillListCtrl.js
+末尾多了一大段
+<div ng-controller="csEcoItemSubclassProductTypeMapListCtrl" class="gridtable">
++
+    <form class="form bg-white" inner-frame data-des="此节点必需－内框页面的指令" ng-submit="dataTable.search(1)">
++
+        <div class="bg-gray-white bt">
++
+            <div class="bg-gray-white p5">
++
+                <div class="pull-right ml10">
++
+                    <div class="btn-group btn-group-xs ">
++
+                        <button class="btn btn-default" type="button" ng-click="search()">
++
+                            <i class="fa fa-search" aria-hidden="true"></i>搜索
++
+                        </button>
++
+                        <button class="btn btn-default" type="button" ng-click="restore()">
++
+                            <i class="fa fa-undo" aria-hidden="true"></i>重置
++
+                        </button>
++
+                    </div>
++
+                    <div class="btn-group btn-group-xs" permission-buttons="btnNew,btnModify,btnDel,btnExport">
++
+                    </div>
++
+                </div>
++
+                <div class="btn-group btn-group-xs">
++
+                    <button type="button" class="btn  btn-warning" ng-click="moreInput($event)" ng-bind="$l('高级查询')">
++
+                        <i class="fa fa-chevron-circle-down"></i>
++
+                    </button>
++
+                    <button type="button" class="btn btn-primary" ng-click="fullWindow($event)" ng-bind="$l('数据全屏')">
++
+                        <i class="fa fa-square-o"></i>
++
+                    </button>
++
+                </div>
++
+            </div>
++
+        </div>
++
+        <div main-scroll-style data-des="此节点必需－用户计算滚动区域高度">
++
+            <div class="nicescroll-height  bg-white " ng-nicescroll
++
+                 nice-option="{{niceOpction}}" data-des="此节点必需-滚动内容及指令">
++
+                <div class=" mt10 pb5 input-form bb oh" input-form data-des="此节点必需－用于识别输入表单的指令">
++
+                    <div search-form
++
+                         data-legend="[
++
+                            {key:'itemSubclassCode_like',label:'物料小类编码:'},
++
+                            {key:'ecoProductType',label:'生态链产品类型',type:'lookCode',lookCode:'ECOSYSTEM_ITEM_TYPE'},
++
+                            {key:'enabledFlag',label:'启用',type:'lookCode',lookCode:'YES_OR_NO'}
++
+                        ]"
++
+                         ng-model="params"
++
+                    ></div>
++
+                </div>
++
+                <div class="data-table">
++
+                    <div base-data-table="dataTable"
++
+                         ng-params="params"
++
+                         data-show-index="true"
++
+                         data-auto-request="true"
++
+                         data-url="findCsEcoItemSubclassProductTypeMapPagination"
++
+                         data-legend="[
++
+                             {'value':'itemSubclassCode','name':'物料小类编码'},
++
+                             {'value':'ecoProductType','name':'生态链产品类型'},
++
+                             {'value':'enabledFlag','name':'启用'},
++
+                             {'value':'remark','name':'备注'},
++
+                             {'value':'creationDate','name':'创建时间','formatDate':'YYYY-MM-dd'}
++
+                         ]"
++
+                    ></div>
++
+                </div>
++
+            </div>
++
+        </div>
++
+    </form>
++
+
++
+    <div class="modal fade" id="ecoSubclassProductTypeMapModal" data-backdrop="static" tabindex="-1">
++
+        <div class="modal-dialog modal-dialog-lg">
++
+            <div class="modal-content">
++
+                <div class="modal-header">
++
+                    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
++
+                    <h4 class="modal-title">{{modalTitle}}</h4>
++
+                </div>
++
+                <form class="ngValid" name="ecoMapForm">
++
+                    <div class="modal-body">
++
+                        <div class="pl30 pr30 row">
++
+                            <div class="form-group col-xs-6 col-md-6">
++
+                                <div class="input-group input-group-xs">
++
+                                    <label class="input-group-addon bn"><span class="w120"><i class="red">*</i>物料小类编码：</span></label>
++
+                                    <input type="text" class="form-control radius3" name="itemSubclassCode" required
++
+                                           ng-model="currentData.itemSubclassCode"
++
+                                           ng-disabled="currentData.mapId"/>
++
+                                </div>
++
+                            </div>
++
+                            <div class="form-group col-xs-6 col-md-6">
++
+                                <div class="input-group input-group-xs">
++
+                                    <label class="input-group-addon bn"><span class="w120"><i class="red">*</i>生态链产品类型：</span></label>
++
+                                    <div lookup-code="ECOSYSTEM_ITEM_TYPE" name="ecoProductType" required
++
+                                         ng-model="currentData.ecoProductType"></div>
++
+                                </div>
++
+                            </div>
++
+                            <div class="form-group col-xs-6 col-md-6">
++
+                                <div class="input-group input-group-xs">
++
+                                    <label class="input-group-addon bn"><span class="w120"><i class="red">*</i>启用：</span></label>
++
+                                    <div lookup-code="YES_OR_NO" name="enabledFlag" required
++
+                                         ng-model="currentData.enabledFlag"></div>
++
+                                </div>
++
+                            </div>
++
+                            <div class="form-group col-xs-12 col-md-12">
++
+                                <div class="input-group input-group-xs">
++
+                                    <label class="input-group-addon bn"><span class="w120">备注：</span></label>
++
+                                    <textarea class="form-control radius3" rows="2" name="remark" ng-model="currentData.remark"></textarea>
++
+                                </div>
++
+                            </div>
++
+                        </div>
++
+                    </div>
++
+                    <div class="modal-footer">
++
+                        <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
++
+                        <button type="button" class="btn btn-primary" ng-click="btnSaveMap(ecoMapForm.$invalid)">保存</button>
++
+                    </div>
++
+                </form>
++
+            </div>
++
+        </div>
++
+    </div>
++
+</div>
++
+
+Index: C:/Users/0235444/Workspace/ims/facade/src/app/ims/templates/cs/csEcoServiceBillListCtrl.js
+
+遗漏csEcoServiceBillDetailCtrl.js
