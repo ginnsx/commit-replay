@@ -23,6 +23,7 @@ import {
   getRepoPairMappings,
   listEditors,
   listMigrations,
+  listRelayedCommits,
   listRepoCommits,
   listRepos,
   openFileInEditor,
@@ -81,6 +82,7 @@ export default function App() {
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<AppErrorPayload | null>(null);
   const [lastBatchSize, setLastBatchSize] = useState(0);
+  const [relayedCommits, setRelayedCommits] = useState<Set<string>>(new Set());
 
   const [previewMeta, setPreviewMeta] = useState<PreviewMetaResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -167,6 +169,15 @@ export default function App() {
     setMigrations(await listMigrations());
   }, []);
 
+  const loadRelayedCommits = useCallback(async () => {
+    if (!sourceId) {
+      setRelayedCommits(new Set());
+      return;
+    }
+    const refs = await listRelayedCommits(sourceId);
+    setRelayedCommits(new Set(refs));
+  }, [sourceId]);
+
   useEffect(() => {
     refreshRepos().catch((e: AppErrorPayload) => setGlobalError(e.message));
     refreshEditors().catch(() => undefined);
@@ -202,6 +213,7 @@ export default function App() {
       setLastBatchSize(0);
       setCommits([]);
       loadCommits(true);
+      loadRelayedCommits().catch(() => undefined);
     }
   }, [step, sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -422,6 +434,7 @@ export default function App() {
       setMigrated(true);
       await saveRepoPairMappings(sourceId, targetId, activeMappings, customMapping);
       await refreshMigrations();
+      await loadRelayedCommits();
     } catch (e) {
       setToast(<span>{(e as AppErrorPayload).message}</span>);
     } finally {
@@ -649,6 +662,7 @@ export default function App() {
               <p>
                 来自 <strong>{source?.name}</strong> · 最近 {commits.length} 条提交，已选{" "}
                 {selectedCommits.size} 条
+                {relayedCommits.size > 0 ? `，${relayedCommits.size} 条已提交` : ""}
               </p>
             </div>
           </div>
@@ -666,6 +680,7 @@ export default function App() {
             <CommitPicker
               commits={commits}
               selectedIds={selectedCommits}
+              relayedIds={relayedCommits}
               onToggle={toggleCommit}
               onSelectMany={selectCommits}
               hasRemoteMore={lastBatchSize === COMMIT_FETCH_SIZE}

@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
 use crate::{
-    diff::line_diff::{find_overlap_lines, lines_to_diff, patch_to_diff_lines},
+    diff::line_diff::{
+        diff_with_context, find_overlap_lines, lines_to_diff, patch_to_diff_lines,
+        DEFAULT_DIFF_CONTEXT_LINES,
+    },
     model::{FileChange, FileChangeKind, LocationStatus, MergeStatus},
     preview::patch_apply::{reconstruct_new_from_patch, reconstruct_old_from_patch},
     preview::target_wc::{check_apply, TargetWcKind},
     relay::file_kind_to_status,
     store::models::{
-        DiffLineType, IntegrationItemView, IntegrationPlanResult, IntegrationStatus,
-        IntegrationStrategy, MigrationMode,
+        IntegrationItemView, IntegrationPlanResult, IntegrationStatus, IntegrationStrategy,
+        MigrationMode,
     },
 };
 
@@ -121,10 +124,7 @@ fn integration_diff_lines(fc: &FileChange) -> Vec<crate::store::models::DiffLine
     } else {
         lines_to_diff(fc.before.as_deref(), fc.after.as_deref())
     };
-    lines
-        .into_iter()
-        .filter(|l| !matches!(l.line_type, DiffLineType::Ctx))
-        .collect()
+    diff_with_context(lines, DEFAULT_DIFF_CONTEXT_LINES)
 }
 
 pub fn build_integration_plan(
@@ -404,7 +404,7 @@ mod tests {
     use super::*;
     use crate::{
         model::{ChangeAnalysis, LocationStatus, MatchMethod, MergeStatus},
-        store::models::{IntegrationStatus, IntegrationStrategy},
+        store::models::{DiffLineType, IntegrationStatus, IntegrationStrategy},
     };
 
     fn modify_fc(before: &str, after: &str, patch: &str) -> FileChange {
@@ -459,6 +459,35 @@ mod tests {
         );
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
+    }
+
+    #[test]
+    fn integration_plan_diff_includes_context_lines() {
+        let fc = modify_fc(
+            "alpha\nold\nomega\n",
+            "alpha\nnew\nomega\n",
+            "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n",
+        );
+        let plan = build_integration_plan(
+            &[fc],
+            "/tmp",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        let diff = &plan.items[0].diff;
+        assert!(diff
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Ctx) && l.text == "alpha"));
+        assert!(diff
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Del) && l.text == "old"));
+        assert!(diff
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Add) && l.text == "new"));
+        assert!(diff
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Ctx) && l.text == "omega"));
     }
 
     #[test]

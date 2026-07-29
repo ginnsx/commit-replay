@@ -16,7 +16,10 @@ use commands::{
         build_integration_plan_cmd, build_preview, build_preview_meta, build_source_preview_meta,
         detect_conflicts, get_file_diff,
     },
-    reader::{get_repo_mappings, get_repo_pair_mappings, list_repo_commits, load_changeset, save_repo_pair_mappings, validate_migration_combo},
+    reader::{
+        get_repo_mappings, get_repo_pair_mappings, list_relayed_commits_cmd, list_repo_commits,
+        load_changeset, save_repo_pair_mappings, validate_migration_combo,
+    },
     settings::*,
     writer::{open_file_in_editor, open_file_in_system},
 };
@@ -57,6 +60,7 @@ pub fn run() {
             relay_probe_svn_wc,
             relay_probe_git_repo,
             list_repo_commits,
+            list_relayed_commits_cmd,
             load_changeset,
             validate_migration_combo,
             get_repo_mappings,

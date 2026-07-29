@@ -353,6 +353,12 @@
     .badge-mod { background: var(--mod-bg); color: var(--mod); }
     .badge-del { background: var(--del-bg); color: var(--del); }
     .badge-warn { background: var(--warn-bg); color: var(--warn); }
+    .badge-relayed {
+      margin-left: 8px;
+      background: var(--bg-raised);
+      color: var(--text-muted);
+      vertical-align: middle;
+    }
 
     .card {
       background: var(--bg-base);
@@ -528,6 +534,9 @@
     .commit-row.selected {
       background: var(--accent-dim);
       border-color: rgba(78, 205, 196, 0.25);
+    }
+    .commit-row.relayed:not(.selected) {
+      opacity: 0.72;
     }
     .commit-check {
       width: 18px;

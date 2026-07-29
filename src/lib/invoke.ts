@@ -144,6 +144,10 @@ export async function listRepoCommits(
   }));
 }
 
+export async function listRelayedCommits(sourceId: string): Promise<string[]> {
+  return invoke<string[]>("list_relayed_commits_cmd", { sourceId });
+}
+
 export async function validateMigrationCombo(
   sourceId: string,
   targetId: string,

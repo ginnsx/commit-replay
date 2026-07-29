@@ -58,10 +58,79 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             data TEXT NOT NULL,
             PRIMARY KEY (source_id, target_id)
         );
+        CREATE TABLE IF NOT EXISTS relayed_commits (
+            source_id TEXT NOT NULL,
+            commit_ref TEXT NOT NULL,
+            relayed_at TEXT NOT NULL,
+            PRIMARY KEY (source_id, commit_ref)
+        );
         ",
     )
     .map_err(db_err)?;
+    backfill_relayed_commits(conn)?;
     Ok(())
+}
+
+fn repo_path_key(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+fn backfill_relayed_commits(conn: &Connection) -> Result<()> {
+    let repos = list_repos(conn)?;
+    let migrations = list_migrations(conn)?;
+    for m in migrations {
+        if m.status != "success" {
+            continue;
+        }
+        let path_key = repo_path_key(&m.source.path);
+        let Some(source_id) = repos
+            .iter()
+            .find(|r| repo_path_key(&r.path) == path_key)
+            .map(|r| r.id.as_str())
+        else {
+            continue;
+        };
+        for c in &m.commits {
+            conn.execute(
+                "INSERT OR IGNORE INTO relayed_commits (source_id, commit_ref, relayed_at) VALUES (?1, ?2, ?3)",
+                params![source_id, c.id, m.completed_at],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn record_relayed_commits(
+    conn: &Connection,
+    source_id: &str,
+    commit_refs: &[String],
+    relayed_at: &str,
+) -> Result<()> {
+    for commit_ref in commit_refs {
+        conn.execute(
+            "INSERT OR REPLACE INTO relayed_commits (source_id, commit_ref, relayed_at) VALUES (?1, ?2, ?3)",
+            params![source_id, commit_ref, relayed_at],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+pub fn list_relayed_commits(conn: &Connection, source_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn
+        .prepare("SELECT commit_ref FROM relayed_commits WHERE source_id = ?1")
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map(params![source_id], |row| row.get(0))
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(db_err)?);
+    }
+    Ok(out)
 }
 
 

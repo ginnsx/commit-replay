@@ -453,7 +453,10 @@ pub async fn execute_migration(
         .0
         .lock()
         .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let commit_refs: Vec<String> = output.record.commits.iter().map(|c| c.id.clone()).collect();
+    let relayed_at = output.record.completed_at.clone();
     save_migration(&conn, output.record)?;
+    crate::store::db::record_relayed_commits(&conn, &source_id, &commit_refs, &relayed_at)?;
 
     Ok(output.result)
 }

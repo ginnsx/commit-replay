@@ -1,8 +1,11 @@
 use crate::error::{AppError, Result};
 use crate::model::{FileChange, FileChangeKind};
-use crate::store::models::{DiffLine, DiffLineType, FileChangeView, FileStatus};
+use crate::store::models::{DiffLine, FileChangeView, FileStatus};
 
-use crate::diff::line_diff::{count_line_stats, count_patch_stats, lines_to_diff, patch_to_diff_lines};
+use crate::diff::line_diff::{
+    count_line_stats, count_patch_stats, diff_with_context, lines_to_diff, patch_to_diff_lines,
+    DEFAULT_DIFF_CONTEXT_LINES,
+};
 
 pub fn file_kind_to_status(kind: &FileChangeKind) -> FileStatus {
     match kind {
@@ -18,10 +21,7 @@ fn preview_diff_lines(fc: &FileChange) -> Vec<DiffLine> {
     } else {
         lines_to_diff(fc.before.as_deref(), fc.after.as_deref())
     };
-    lines
-        .into_iter()
-        .filter(|l| !matches!(l.line_type, DiffLineType::Ctx))
-        .collect()
+    diff_with_context(lines, DEFAULT_DIFF_CONTEXT_LINES)
 }
 
 pub fn file_change_to_view(fc: &FileChange, include_diff: bool) -> FileChangeView {

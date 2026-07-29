@@ -3,7 +3,10 @@ use tauri::State;
 use crate::error::AppError;
 use crate::model::ReplayUnitMeta;
 use crate::relay::{validate_repo_path, is_supported_migration, unsupported_combo_message};
-use crate::store::db::{decrypt_repo_pass, get_repo, get_repo_pair_mapping, repo_path_mappings, save_repo_pair_mapping, touch_repo, DbState};
+use crate::store::db::{
+    decrypt_repo_pass, get_repo, get_repo_pair_mapping, list_relayed_commits, repo_path_mappings,
+    save_repo_pair_mapping, touch_repo, DbState,
+};
 use crate::store::models::RepoPairMappingInput;
 use crate::vcs::{ensure_different_repos, repo_type_str, SourceReader};
 
@@ -90,6 +93,18 @@ pub async fn list_repo_commits(
         .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     let _ = touch_repo(&conn, &id);
     Ok(metas.iter().map(meta_to_item).collect())
+}
+
+#[tauri::command]
+pub fn list_relayed_commits_cmd(
+    state: State<DbState>,
+    source_id: String,
+) -> Result<Vec<String>, AppError> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    list_relayed_commits(&conn, &source_id)
 }
 
 #[tauri::command]
