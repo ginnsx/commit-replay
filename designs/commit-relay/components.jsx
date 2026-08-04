@@ -53,7 +53,7 @@ function StatusBadge({ status }) {
   return <span className={`badge ${cls}`}>{STATUS_LABELS[status]}</span>;
 }
 
-function TitleBar() {
+function TitleBar({ updateVersion, onOpenUpdate }) {
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
@@ -63,6 +63,11 @@ function TitleBar() {
         </div>
       </div>
       <div className="win-controls">
+        {updateVersion ? (
+          <button className="titlebar-update" onClick={onOpenUpdate}>
+            发现新版本 v{updateVersion}
+          </button>
+        ) : null}
         <button className="win-btn" aria-label="最小化">
           <IconMin />
         </button>
@@ -530,6 +535,93 @@ function EditorSettings({ editors, selectedId, onSelect, onAdd, onRemove }) {
   );
 }
 
+function UpdateSettings({ status, progress, onCheck, onInstall, onLater, onPreviewStatus }) {
+  const checking = status === "checking";
+  const downloading = status === "downloading";
+  const hasUpdate = status === "available" || downloading;
+  const progressValue = downloading ? progress : 0;
+
+  return (
+    <div className="update-settings" data-screen-label="关于和更新">
+      <div className="prototype-state-control" aria-label="原型演示状态">
+        <span>原型状态</span>
+        <select value={status} onChange={(event) => onPreviewStatus(event.target.value)}>
+          <option value="idle">尚未检查</option>
+          <option value="checking" disabled>
+            检查中
+          </option>
+          <option value="latest">已是最新</option>
+          <option value="available">发现新版</option>
+          <option value="downloading">下载中</option>
+          <option value="failed">检查失败</option>
+        </select>
+      </div>
+
+      <div className="update-card">
+        <div>
+          <div className="update-card-label">当前版本</div>
+          <div className="update-version">v0.3.0</div>
+          <div className="update-meta">上次成功检查：2026-08-04 12:40</div>
+        </div>
+        <button className="btn btn-ghost" disabled={checking || downloading} onClick={onCheck}>
+          {checking ? "检查中…" : "检查更新"}
+        </button>
+      </div>
+
+      {status === "idle" ? (
+        <div className="update-notice">Relay 会在启动后自动检查，也可以随时手动检查。</div>
+      ) : null}
+      {status === "latest" ? <div className="update-notice ok">当前已是最新版本。</div> : null}
+      {status === "failed" ? (
+        <div className="update-notice error">
+          检查失败，请确认网络连接后重试。当前版本仍可正常使用。
+        </div>
+      ) : null}
+
+      {hasUpdate ? (
+        <div className="update-card update-card--available">
+          <div className="update-release-header">
+            <div>
+              <div className="update-card-label">发现新版本</div>
+              <div className="update-version">v0.4.0</div>
+            </div>
+            <div className="update-meta">发布于 2026-08-04</div>
+          </div>
+          <div className="update-notes">
+            <strong>本次更新</strong>
+            <ul>
+              <li>优化迁移预览的代码阅读空间</li>
+              <li>改进 Windows 自动更新体验</li>
+              <li>修复部分 Git 与 SVN 路径处理问题</li>
+            </ul>
+          </div>
+          {downloading ? (
+            <div className="update-download-block" aria-live="polite">
+              <div className="update-download-label">
+                <span>正在下载并安装</span>
+                <strong>{progressValue}%</strong>
+              </div>
+              <div className="update-progress-track" aria-label={`更新进度 ${progressValue}%`}>
+                <div className="update-progress-value" style={{ width: `${progressValue}%` }}></div>
+              </div>
+              <div className="update-meta">完成后 Relay 将自动重启，请勿关闭应用。</div>
+            </div>
+          ) : (
+            <div className="update-actions">
+              <button className="btn btn-ghost" onClick={onLater}>
+                稍后处理
+              </button>
+              <button className="btn btn-primary" onClick={onInstall}>
+                下载并安装
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Toast({ message, onDone }) {
   React.useEffect(() => {
     const t = setTimeout(onDone, 3200);
@@ -945,6 +1037,7 @@ Object.assign(window, {
   EditorOpenMenu,
   EditorAppModal,
   EditorSettings,
+  UpdateSettings,
   Toast,
   RepoModal,
   RepoManagement,

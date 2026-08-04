@@ -166,6 +166,28 @@
       .win-controls {
         display: flex;
         height: 100%;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 2;
+        -webkit-app-region: no-drag;
+        app-region: no-drag;
+      }
+      .titlebar-update {
+        align-self: center;
+        margin-right: 8px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: var(--accent);
+        background: var(--accent-dim);
+        font-size: 11px;
+        white-space: nowrap;
+        transition:
+          background 0.1s,
+          color 0.1s;
+      }
+      .titlebar-update:hover {
+        color: var(--text);
+        background: var(--bg-hover);
       }
       .win-btn {
         width: 46px;
@@ -1311,6 +1333,141 @@
       .settings-tab.active {
         background: var(--accent-dim);
         color: var(--accent);
+      }
+
+      .update-settings {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 720px;
+      }
+      .prototype-state-control {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: fit-content;
+        padding: 6px 8px;
+        border: 1px dashed var(--border-strong);
+        border-radius: var(--radius);
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+      .prototype-state-control select {
+        min-width: 116px;
+        padding: 4px 26px 4px 8px;
+        font-size: 11px;
+      }
+      .update-card {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-base);
+      }
+      .update-card > :first-child {
+        flex: 1;
+      }
+      .update-card--available {
+        display: block;
+        border-color: rgba(78, 205, 196, 0.28);
+      }
+      .update-card-label {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .update-version {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 20px;
+        font-weight: 600;
+      }
+      .update-meta {
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .update-release-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .update-notice {
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        background: var(--bg-base);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .update-notice.ok {
+        border-color: rgba(78, 205, 196, 0.35);
+        color: var(--accent);
+      }
+      .update-notice.error {
+        border-color: rgba(247, 129, 102, 0.45);
+        color: var(--danger);
+      }
+      .update-notes {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: var(--radius);
+        background: var(--bg-raised);
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .update-notes strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+        font-weight: 600;
+      }
+      .update-notes ul {
+        padding-left: 18px;
+      }
+      .update-notes li + li {
+        margin-top: 2px;
+      }
+      .update-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .update-download-block {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .update-download-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+      .update-download-label strong {
+        color: var(--accent);
+        font-family: var(--mono);
+      }
+      .update-progress-track {
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--bg-deep);
+      }
+      .update-progress-value {
+        height: 100%;
+        border-radius: inherit;
+        background: var(--accent);
+        transition: width 0.25s ease;
       }
 
       .toast {

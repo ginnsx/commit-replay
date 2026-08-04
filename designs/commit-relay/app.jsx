@@ -722,6 +722,9 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState(null);
   const [settingsTab, setSettingsTab] = useState("repos");
+  const [updateStatus, setUpdateStatus] = useState("available");
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [animateUpdate, setAnimateUpdate] = useState(false);
   const [editors, setEditors] = useState(EDITOR_PRESETS);
   const [selectedEditorId, setSelectedEditorId] = useState("vscode");
   const [migrationHistory, setMigrationHistory] = useState(INITIAL_MIGRATION_HISTORY);
@@ -792,6 +795,43 @@ function App() {
     );
     return () => window.clearTimeout(timer);
   }, [executing, executionPhase]);
+
+  useEffect(() => {
+    if (updateStatus !== "downloading" || !animateUpdate) return undefined;
+    const timer = window.setInterval(() => {
+      setUpdateProgress((value) => {
+        if (value >= 100) return value;
+        const next = Math.min(100, value + 7);
+        if (next === 100) {
+          window.setTimeout(() => {
+            setUpdateStatus("latest");
+            setAnimateUpdate(false);
+            setToast("更新已安装，Relay 将自动重启");
+          }, 500);
+        }
+        return next;
+      });
+    }, 450);
+    return () => window.clearInterval(timer);
+  }, [animateUpdate, updateStatus]);
+
+  const previewUpdateStatus = (status) => {
+    setAnimateUpdate(false);
+    setUpdateStatus(status);
+    setUpdateProgress(status === "downloading" ? 62 : 0);
+  };
+
+  const checkForUpdates = () => {
+    setAnimateUpdate(false);
+    setUpdateStatus("checking");
+    window.setTimeout(() => setUpdateStatus("latest"), 900);
+  };
+
+  const installUpdate = () => {
+    setUpdateProgress(8);
+    setAnimateUpdate(true);
+    setUpdateStatus("downloading");
+  };
 
   useEffect(() => {
     if (!focusPreview) return undefined;
@@ -907,12 +947,12 @@ function App() {
       <div className="main-header">
         <div>
           <h1>设置</h1>
-          <p>管理仓库、编辑器与迁移记录</p>
+          <p>管理仓库、编辑器、迁移记录与应用更新</p>
         </div>
       </div>
       <div className="main-content main-content--scroll">
         <div className="settings-tabs">
-          {["repos", "editors", "history"].map((tab) => (
+          {["repos", "editors", "history", "updates"].map((tab) => (
             <button
               key={tab}
               type="button"
@@ -922,7 +962,13 @@ function App() {
                 setHistoryDetailId(null);
               }}
             >
-              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : "迁移记录"}
+              {tab === "repos"
+                ? "仓库"
+                : tab === "editors"
+                  ? "编辑器"
+                  : tab === "history"
+                    ? "迁移记录"
+                    : "关于和更新"}
             </button>
           ))}
         </div>
@@ -940,6 +986,15 @@ function App() {
             onSelect={setSelectedEditorId}
             onAdd={() => setModal({ mode: "editor" })}
             onRemove={(id) => setEditors((items) => items.filter((editor) => editor.id !== id))}
+          />
+        ) : settingsTab === "updates" ? (
+          <UpdateSettings
+            status={updateStatus}
+            progress={updateProgress}
+            onCheck={checkForUpdates}
+            onInstall={installUpdate}
+            onLater={() => setSettingsTab("repos")}
+            onPreviewStatus={previewUpdateStatus}
           />
         ) : historyDetailId ? (
           <MigrationDetail
@@ -1282,7 +1337,9 @@ function App() {
         ? `${repos.length} 个已保存仓库`
         : settingsTab === "editors"
           ? `默认编辑器：${selectedEditor?.name ?? "未选择"}`
-          : `${migrationHistory.length} 条迁移记录`;
+          : settingsTab === "updates"
+            ? "当前版本 v0.3.0"
+            : `${migrationHistory.length} 条迁移记录`;
     if (step === "source" && !sourceId) return "请选择一个源仓库";
     if (step === "commits") return `已选择 ${selectedCommits.size} 条提交`;
     if (step === "target" && !targetId) return "请选择目标仓库";
@@ -1300,7 +1357,16 @@ function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar />
+      <TitleBar
+        updateVersion={
+          updateStatus === "available" || updateStatus === "downloading" ? "0.4.0" : null
+        }
+        onOpenUpdate={() => {
+          setShowRepos(true);
+          setSettingsTab("updates");
+          setHistoryDetailId(null);
+        }}
+      />
       <div className="body">
         <StepRail
           steps={STEPS}
