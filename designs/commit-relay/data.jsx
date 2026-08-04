@@ -91,7 +91,12 @@ const FILE_CHANGES = [
       { type: "del", old: 43, new: null, text: "        retryOnce(event);" },
       { type: "add", old: null, new: 43, text: "        retryWithBackoff(event, MAX_RETRIES);" },
       { type: "ctx", old: 44, new: 44, text: "        metrics.record(event.getType());" },
-      { type: "add", old: null, new: 45, text: "        log.info(\"callback processed: {}\", event.getId());" },
+      {
+        type: "add",
+        old: null,
+        new: 45,
+        text: '        log.info("callback processed: {}", event.getId());',
+      },
     ],
   },
   {
@@ -104,7 +109,12 @@ const FILE_CHANGES = [
       { type: "add", old: null, new: 1, text: "alipay:" },
       { type: "add", old: null, new: 2, text: "  sandbox:" },
       { type: "add", old: null, new: 3, text: "    enabled: true" },
-      { type: "add", old: null, new: 4, text: "    gateway: https://openapi.alipaydev.com/gateway.do" },
+      {
+        type: "add",
+        old: null,
+        new: 4,
+        text: "    gateway: https://openapi.alipaydev.com/gateway.do",
+      },
       { type: "add", old: null, new: 5, text: "    app-id: ${ALIPAY_SANDBOX_APP_ID}" },
     ],
   },
@@ -143,8 +153,18 @@ const FILE_CHANGES = [
     deletions: 2,
     diff: [
       { type: "ctx", old: 18, new: 18, text: "    <properties>" },
-      { type: "del", old: 19, new: null, text: "        <spring-boot.version>3.2.4</spring-boot.version>" },
-      { type: "add", old: null, new: 19, text: "        <spring-boot.version>3.2.5</spring-boot.version>" },
+      {
+        type: "del",
+        old: 19,
+        new: null,
+        text: "        <spring-boot.version>3.2.4</spring-boot.version>",
+      },
+      {
+        type: "add",
+        old: null,
+        new: 19,
+        text: "        <spring-boot.version>3.2.5</spring-boot.version>",
+      },
       { type: "ctx", old: 20, new: 20, text: "    </properties>" },
     ],
   },
@@ -171,7 +191,7 @@ const CONFLICTS = [
       "        retryWithBackoff(event, MAX_RETRIES);",
       "        notifyDownstream(event);",
       "        metrics.record(event.getType());",
-      "        log.info(\"callback processed: {}\", event.getId());",
+      '        log.info("callback processed: {}", event.getId());',
       "    }",
     ],
   },
@@ -219,30 +239,120 @@ function alignConflictLines(beforeLines, afterLines) {
 const STEPS = [
   { id: "source", label: "源仓库", num: 1 },
   { id: "commits", label: "选择提交", num: 2 },
-  { id: "preview", label: "变更预览", num: 3 },
-  { id: "target", label: "目标仓库", num: 4 },
+  { id: "target", label: "目标仓库", num: 3 },
+  { id: "preview", label: "变更预览", num: 4 },
   { id: "migrate", label: "迁移", num: 5 },
 ];
+
+const INTEGRATION_ITEMS = [
+  {
+    ...CONFLICTS[0],
+    id: "f1",
+    integrationStatus: "blocked",
+    strategy: "manual_merge",
+  },
+  {
+    ...CONFLICTS[1],
+    id: "f2",
+    integrationStatus: "review",
+    strategy: "write_after",
+    reason: "目标仓库已存在同名文件，需要确认覆盖",
+  },
+  {
+    id: "f3",
+    path: FILE_CHANGES[2].path,
+    status: FILE_CHANGES[2].status,
+    integrationStatus: "auto_ok",
+    strategy: "apply_patch",
+    reason: "补丁可安全应用，无重叠变更",
+    before: [],
+    after: [],
+    diff: FILE_CHANGES[2].diff,
+  },
+  {
+    id: "f4",
+    path: FILE_CHANGES[3].path,
+    status: FILE_CHANGES[3].status,
+    integrationStatus: "auto_ok",
+    strategy: "apply_patch",
+    reason: "删除操作与目标工作区状态一致",
+    before: [],
+    after: [],
+    diff: FILE_CHANGES[3].diff,
+  },
+  {
+    id: "f5",
+    path: FILE_CHANGES[4].path,
+    status: FILE_CHANGES[4].status,
+    integrationStatus: "auto_ok",
+    strategy: "apply_patch",
+    reason: "补丁可安全应用，无重叠变更",
+    before: [],
+    after: [],
+    diff: FILE_CHANGES[4].diff,
+  },
+];
+
+const MIGRATION_MODE_LABELS = {
+  incremental_first: "增量优先",
+  commit_result: "以提交结果为准",
+  strict_replay: "严格复现",
+};
 
 const STATUS_LABELS = { add: "新增", mod: "修改", del: "删除" };
 
 const EDITOR_PRESETS = [
-  { id: "vscode", name: "VS Code", kind: "vscode", exe: "C:\\Users\\zhangwei\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe" },
-  { id: "vs", name: "Visual Studio", kind: "visualstudio", exe: "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe" },
-  { id: "cursor", name: "Cursor", kind: "cursor", exe: "C:\\Users\\zhangwei\\AppData\\Local\\Programs\\cursor\\Cursor.exe" },
+  {
+    id: "vscode",
+    name: "VS Code",
+    kind: "vscode",
+    exe: "C:\\Users\\zhangwei\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+  },
+  {
+    id: "vs",
+    name: "Visual Studio",
+    kind: "visualstudio",
+    exe: "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe",
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    kind: "cursor",
+    exe: "C:\\Users\\zhangwei\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
+  },
   { id: "explorer", name: "File Explorer", kind: "explorer", exe: "explorer.exe" },
   { id: "terminal", name: "Terminal", kind: "terminal", exe: "wt.exe" },
   { id: "gitbash", name: "Git Bash", kind: "gitbash", exe: "C:\\Program Files\\Git\\git-bash.exe" },
-  { id: "idea", name: "IntelliJ IDEA", kind: "idea", exe: "C:\\Program Files\\JetBrains\\IntelliJ IDEA 2024.1\\bin\\idea64.exe" },
-  { id: "pycharm", name: "PyCharm", kind: "pycharm", exe: "C:\\Program Files\\JetBrains\\PyCharm 2024.1\\bin\\pycharm64.exe" },
+  {
+    id: "idea",
+    name: "IntelliJ IDEA",
+    kind: "idea",
+    exe: "C:\\Program Files\\JetBrains\\IntelliJ IDEA 2024.1\\bin\\idea64.exe",
+  },
+  {
+    id: "pycharm",
+    name: "PyCharm",
+    kind: "pycharm",
+    exe: "C:\\Program Files\\JetBrains\\PyCharm 2024.1\\bin\\pycharm64.exe",
+  },
 ];
 
 const INITIAL_MIGRATION_HISTORY = [
   {
     id: "m1",
     completedAt: "2026-06-14 18:05",
-    source: { name: "payment-service", path: "D:\\Projects\\payment-service", type: "git", branch: "main" },
-    target: { name: "legacy-billing", path: "D:\\SVN\\legacy-billing", type: "svn", branch: "trunk" },
+    source: {
+      name: "payment-service",
+      path: "D:\\Projects\\payment-service",
+      type: "git",
+      branch: "main",
+    },
+    target: {
+      name: "legacy-billing",
+      path: "D:\\SVN\\legacy-billing",
+      type: "svn",
+      branch: "trunk",
+    },
     commits: [COMMITS[0], COMMITS[1]],
     files: FILE_CHANGES,
     conflictsResolved: 2,
@@ -251,8 +361,18 @@ const INITIAL_MIGRATION_HISTORY = [
   {
     id: "m2",
     completedAt: "2026-06-10 09:30",
-    source: { name: "mobile-gateway", path: "D:\\Projects\\mobile-gateway", type: "git", branch: "develop" },
-    target: { name: "config-center", path: "\\\\fileserver\\svn\\config-center", type: "svn", branch: "branches/release-2.4" },
+    source: {
+      name: "mobile-gateway",
+      path: "D:\\Projects\\mobile-gateway",
+      type: "git",
+      branch: "develop",
+    },
+    target: {
+      name: "config-center",
+      path: "\\\\fileserver\\svn\\config-center",
+      type: "svn",
+      branch: "branches/release-2.4",
+    },
     commits: [COMMITS[2], COMMITS[3]],
     files: [FILE_CHANGES[0], FILE_CHANGES[4]],
     conflictsResolved: 0,
@@ -271,6 +391,18 @@ function migrationStats(files) {
 }
 
 Object.assign(window, {
-  INITIAL_REPOS, COMMITS, COMMIT_PAGE_SIZE, FILE_CHANGES, CONFLICTS, STEPS, STATUS_LABELS, alignConflictLines,
-  EDITOR_PRESETS, splitFilePath, INITIAL_MIGRATION_HISTORY, migrationStats,
+  INITIAL_REPOS,
+  COMMITS,
+  COMMIT_PAGE_SIZE,
+  FILE_CHANGES,
+  CONFLICTS,
+  STEPS,
+  STATUS_LABELS,
+  alignConflictLines,
+  INTEGRATION_ITEMS,
+  MIGRATION_MODE_LABELS,
+  EDITOR_PRESETS,
+  splitFilePath,
+  INITIAL_MIGRATION_HISTORY,
+  migrationStats,
 });

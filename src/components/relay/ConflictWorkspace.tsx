@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from "react";
-import type { DiffLine, Editor, IntegrationItemView, MigrationMode, Repo } from "../../lib/types";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type {
+  DiffLine,
+  Editor,
+  IntegrationItemView,
+  MigrationMode,
+  PathMapping,
+  Repo,
+} from "../../lib/types";
 import { targetFilePath } from "../../lib/constants";
 import { IconCheck, IconChevronDown } from "./icons";
 import { IntegrationFileList } from "./IntegrationFileList";
+import { MigrationSummary } from "./MigrationSummary";
 
 const MODE_LABELS: Record<MigrationMode, string> = {
   incremental_first: "增量优先",
@@ -84,7 +92,11 @@ function EditorOpenMenu({
               {e.name}
             </button>
           ))}
-          <button type="button" className="editor-open-item editor-open-item-add" onClick={onAddCustom}>
+          <button
+            type="button"
+            className="editor-open-item editor-open-item-add"
+            onClick={onAddCustom}
+          >
             选择其他应用…
           </button>
         </div>
@@ -232,6 +244,12 @@ function IntegrationCompareView({
 
 export function ConflictWorkspace({
   items,
+  source,
+  target,
+  commitCount,
+  fileCount,
+  mappings,
+  customMapping,
   migrationMode,
   onMigrationModeChange,
   squashCommits,
@@ -244,7 +262,6 @@ export function ConflictWorkspace({
   activeId,
   acceptedReviewIds,
   resolvedBlockedIds,
-  target,
   editors,
   selectedEditorId,
   onSelectEditor,
@@ -255,8 +272,20 @@ export function ConflictWorkspace({
   onMarkResolved,
   onAcceptAllReview,
   canExecute,
+  summaryExpanded,
+  onToggleSummary,
+  focusPreview,
+  onToggleFocusPreview,
+  codeZoom,
+  onCodeZoomChange,
 }: {
   items: IntegrationItemView[];
+  source?: Repo;
+  target?: Repo;
+  commitCount: number;
+  fileCount: number;
+  mappings: PathMapping[];
+  customMapping: boolean;
   migrationMode: MigrationMode;
   onMigrationModeChange: (mode: MigrationMode) => void;
   squashCommits: boolean;
@@ -269,7 +298,6 @@ export function ConflictWorkspace({
   activeId: string | null;
   acceptedReviewIds: Set<string>;
   resolvedBlockedIds: Set<string>;
-  target?: Repo;
   editors: Editor[];
   selectedEditorId: string;
   onSelectEditor: (id: string) => void;
@@ -280,6 +308,12 @@ export function ConflictWorkspace({
   onMarkResolved: (id: string) => void;
   onAcceptAllReview: () => void;
   canExecute: boolean;
+  summaryExpanded: boolean;
+  onToggleSummary: () => void;
+  focusPreview: boolean;
+  onToggleFocusPreview: () => void;
+  codeZoom: number;
+  onCodeZoomChange: (value: number) => void;
 }) {
   const active = items.find((c) => c.id === activeId);
   const pendingReview = items.filter(
@@ -290,61 +324,110 @@ export function ConflictWorkspace({
   ).length;
 
   return (
-    <div className="integration-workspace">
-      <div className="integration-summary card">
+    <div
+      className="integration-workspace"
+      style={{ "--diff-font-size": `${(12 * codeZoom).toFixed(1)}px` } as CSSProperties}
+    >
+      <MigrationSummary
+        source={source}
+        target={target}
+        commitCount={commitCount}
+        fileCount={fileCount}
+        migrationMode={migrationMode}
+        squashCommits={squashCommits}
+        mappings={mappings}
+        customMapping={customMapping}
+        expanded={summaryExpanded}
+        onToggle={onToggleSummary}
+      />
+      <div className="migration-controls card">
+        <label htmlFor="migration-mode">迁移模式</label>
+        <select
+          id="migration-mode"
+          value={migrationMode}
+          onChange={(event) => onMigrationModeChange(event.target.value as MigrationMode)}
+        >
+          {(Object.keys(MODE_LABELS) as MigrationMode[]).map((mode) => (
+            <option key={mode} value={mode}>
+              {MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+        <label className="integration-squash-toggle">
+          <input
+            type="checkbox"
+            checked={squashCommits}
+            onChange={(event) => onSquashCommitsChange(event.target.checked)}
+          />
+          合并为单次提交
+        </label>
+        {squashCommits && (
+          <input
+            type="text"
+            className="integration-squash-message"
+            aria-label="合并后的提交说明"
+            placeholder="填写提交说明"
+            value={squashCommitMessage}
+            onChange={(event) => onSquashCommitMessageChange(event.target.value)}
+          />
+        )}
+      </div>
+      <div className="integration-toolbar card">
         <div className="integration-summary-stats">
-          <span className="integration-stat integration-stat--auto_ok">{autoOkCount} 可自动应用</span>
+          <span className="integration-stat integration-stat--auto_ok">
+            {autoOkCount} 可自动应用
+          </span>
           <span className="integration-stat integration-stat--review">{reviewCount} 需确认</span>
-          <span className="integration-stat integration-stat--blocked">{blockedCount} 需人工处理</span>
+          <span className="integration-stat integration-stat--blocked">
+            {blockedCount} 需人工处理
+          </span>
+          <span className={`integration-ready${canExecute ? " ready" : ""}`} role="status">
+            {canExecute ? (
+              <>
+                <IconCheck /> 已就绪
+              </>
+            ) : (
+              <>
+                {pendingReview > 0 && `${pendingReview} 个待确认`}
+                {pendingReview > 0 && pendingBlocked > 0 && " · "}
+                {pendingBlocked > 0 && `${pendingBlocked} 个待处理`}
+              </>
+            )}
+          </span>
         </div>
-        <div className="integration-summary-mode">
-          <label htmlFor="migration-mode">迁移模式</label>
-          <select
-            id="migration-mode"
-            value={migrationMode}
-            onChange={(e) => onMigrationModeChange(e.target.value as MigrationMode)}
-          >
-            {(Object.keys(MODE_LABELS) as MigrationMode[]).map((mode) => (
-              <option key={mode} value={mode}>
-                {MODE_LABELS[mode]}
-              </option>
-            ))}
-          </select>
-          <label className="integration-squash-toggle">
-            <input
-              type="checkbox"
-              checked={squashCommits}
-              onChange={(e) => onSquashCommitsChange(e.target.checked)}
-            />
-            合并为单次提交
-          </label>
-          {squashCommits && (
-            <input
-              type="text"
-              className="integration-squash-message"
-              placeholder="commit message"
-              value={squashCommitMessage}
-              onChange={(e) => onSquashCommitMessageChange(e.target.value)}
-            />
-          )}
+        <div className="integration-toolbar-actions">
+          <div className="code-zoom-control" role="group" aria-label="差异代码字号">
+            <button
+              type="button"
+              aria-label="缩小代码"
+              disabled={codeZoom <= 0.9}
+              onClick={() => onCodeZoomChange(Math.max(0.9, codeZoom - 0.1))}
+            >
+              −
+            </button>
+            <span>{Math.round(codeZoom * 100)}%</span>
+            <button
+              type="button"
+              aria-label="放大代码"
+              disabled={codeZoom >= 1.2}
+              onClick={() => onCodeZoomChange(Math.min(1.2, codeZoom + 0.1))}
+            >
+              +
+            </button>
+          </div>
           {pendingReview > 0 && (
             <button type="button" className="btn btn-ghost" onClick={onAcceptAllReview}>
               全部接受需确认项
             </button>
           )}
-        </div>
-        <div className={`integration-ready${canExecute ? " ready" : ""}`}>
-          {canExecute ? (
-            <>
-              <IconCheck /> 集成计划已就绪，可以执行迁移
-            </>
-          ) : (
-            <>
-              {pendingReview > 0 && `${pendingReview} 个待确认`}
-              {pendingReview > 0 && pendingBlocked > 0 && " · "}
-              {pendingBlocked > 0 && `${pendingBlocked} 个待处理`}
-            </>
-          )}
+          <button
+            type="button"
+            className={`btn ${focusPreview ? "btn-primary" : "btn-ghost"}`}
+            aria-pressed={focusPreview}
+            onClick={onToggleFocusPreview}
+          >
+            {focusPreview ? "退出专注预览" : "专注预览"}
+          </button>
         </div>
       </div>
       <div className="conflict-workspace">

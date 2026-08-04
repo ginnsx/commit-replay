@@ -1,4 +1,42 @@
-const { useState } = React;
+const { useState, useEffect, useRef } = React;
+
+function useDialogBehavior(dialogRef, onClose) {
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    const previous = document.activeElement;
+    const focusable = () => [
+      ...dialog.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ];
+    focusable()[0]?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus?.();
+    };
+  }, [dialogRef, onClose]);
+}
 
 function VcsBadge({ type }) {
   const isGit = type === "git";
@@ -20,27 +58,34 @@ function TitleBar() {
     <div className="titlebar">
       <div className="titlebar-drag">
         <div className="app-logo">R</div>
-        <div className="app-title"><strong>Relay</strong> — 跨仓库提交迁移</div>
+        <div className="app-title">
+          <strong>Relay</strong> — 跨仓库提交迁移
+        </div>
       </div>
       <div className="win-controls">
-        <button className="win-btn" aria-label="最小化"><IconMin /></button>
-        <button className="win-btn" aria-label="最大化"><IconMax /></button>
-        <button className="win-btn close" aria-label="关闭"><IconClose /></button>
+        <button className="win-btn" aria-label="最小化">
+          <IconMin />
+        </button>
+        <button className="win-btn" aria-label="最大化">
+          <IconMax />
+        </button>
+        <button className="win-btn close" aria-label="关闭">
+          <IconClose />
+        </button>
       </div>
     </div>
   );
 }
 
-function StepRail({ steps, current, completed, onStep, onManageRepos, showRepos }) {
-  const stepIndex = steps.findIndex((s) => s.id === current);
+function StepRail({ steps, current, completed, maxReached, onStep, onManageRepos, showRepos }) {
   return (
     <nav className="step-rail">
       <div className="step-rail-header">迁移流程</div>
       <div className="step-list">
         {steps.map((step, i) => {
-          const done = completed.has(step.id);
           const active = step.id === current;
-          const reachable = i <= stepIndex || done;
+          const done = completed.has(step.id) && !active;
+          const reachable = i <= maxReached;
           return (
             <button
               key={step.id}
@@ -55,10 +100,7 @@ function StepRail({ steps, current, completed, onStep, onManageRepos, showRepos 
         })}
       </div>
       <div className="rail-footer">
-        <button
-          className={`rail-footer-btn${showRepos ? " active" : ""}`}
-          onClick={onManageRepos}
-        >
+        <button className={`rail-footer-btn${showRepos ? " active" : ""}`} onClick={onManageRepos}>
           <IconSettings />
           设置
         </button>
@@ -110,9 +152,15 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
 
   const toggleSelectFiltered = () => {
     if (allFilteredSelected) {
-      onSelectMany(filtered.map((c) => c.id), false);
+      onSelectMany(
+        filtered.map((c) => c.id),
+        false,
+      );
     } else {
-      onSelectMany(filtered.map((c) => c.id), true);
+      onSelectMany(
+        filtered.map((c) => c.id),
+        true,
+      );
     }
   };
 
@@ -137,7 +185,12 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
             onChange={(e) => setSearch(e.target.value)}
           />
           {search && (
-            <button type="button" className="commit-search-clear" aria-label="清除搜索" onClick={() => setSearch("")}>
+            <button
+              type="button"
+              className="commit-search-clear"
+              aria-label="清除搜索"
+              onClick={() => setSearch("")}
+            >
               <IconClose />
             </button>
           )}
@@ -154,7 +207,12 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
       {filtered.length === 0 ? (
         <div className="commit-picker-empty">
           <p>没有匹配的提交</p>
-          <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSearch("")}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ fontSize: 12 }}
+            onClick={() => setSearch("")}
+          >
             清除搜索
           </button>
         </div>
@@ -172,8 +230,7 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
           </div>
           <div className="commit-picker-footer">
             <span className="commit-picker-count">
-              已显示 {visible.length} / {filtered.length} 条
-              {q ? `（共 ${commits.length} 条）` : ""}
+              已显示 {visible.length} / {filtered.length} 条{q ? `（共 ${commits.length} 条）` : ""}
             </span>
             {hasMore && (
               <button
@@ -182,7 +239,9 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
                 disabled={loadingMore}
                 onClick={loadMore}
               >
-                {loadingMore ? "加载中…" : `加载更多（${Math.min(pageSize, filtered.length - visible.length)} 条）`}
+                {loadingMore
+                  ? "加载中…"
+                  : `加载更多（${Math.min(pageSize, filtered.length - visible.length)} 条）`}
               </button>
             )}
           </div>
@@ -194,7 +253,12 @@ function CommitPicker({ commits, pageSize, selectedIds, onToggle, onSelectMany }
 
 function CommitRow({ commit, selected, onToggle }) {
   return (
-    <div className={`commit-row${selected ? " selected" : ""}`} onClick={onToggle}>
+    <button
+      type="button"
+      className={`commit-row${selected ? " selected" : ""}`}
+      aria-pressed={selected}
+      onClick={onToggle}
+    >
       <div className="commit-check">{selected && <IconCheck />}</div>
       <span className="commit-hash">{commit.hash}</span>
       <span className="commit-msg">{commit.msg}</span>
@@ -203,7 +267,7 @@ function CommitRow({ commit, selected, onToggle }) {
         <span>{commit.date}</span>
         <span>{commit.files} 个文件</span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -221,14 +285,19 @@ function FileTree({ files, activeId, onSelect }) {
         </span>
       </div>
       {files.map((f) => (
-        <div
+        <button
+          type="button"
           key={f.id}
           className={`file-item${activeId === f.id ? " active" : ""}`}
+          aria-pressed={activeId === f.id}
           onClick={() => onSelect(f.id)}
         >
           <StatusBadge status={f.status} />
-          <span className="file-item-path">{f.path}</span>
-        </div>
+          <span className="file-item-path" title={f.path}>
+            <span className="file-item-name">{splitFilePath(f.path).name}</span>
+            <span className="file-item-dir">{splitFilePath(f.path).dir}</span>
+          </span>
+        </button>
       ))}
     </div>
   );
@@ -238,7 +307,9 @@ function DiffView({ file }) {
   if (!file) {
     return (
       <div className="diff-panel">
-        <div className="empty-state"><p>选择左侧文件查看变更详情</p></div>
+        <div className="empty-state">
+          <p>选择左侧文件查看变更详情</p>
+        </div>
       </div>
     );
   }
@@ -349,6 +420,8 @@ function EditorOpenMenu({ editors, selectedId, onSelect, onOpen, onAddCustom, st
 function EditorAppModal({ onClose, onSave }) {
   const [name, setName] = useState("");
   const [exe, setExe] = useState("");
+  const dialogRef = useRef(null);
+  useDialogBehavior(dialogRef, onClose);
 
   const mockBrowse = () => {
     setExe("D:\\Tools\\MyEditor\\editor.exe");
@@ -356,29 +429,60 @@ function EditorAppModal({ onClose, onSave }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={dialogRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="editor-modal-title"
+      >
         <div className="modal-header">
-          <h2>选择编辑器应用</h2>
-          <button className="icon-btn" onClick={onClose}><IconClose /></button>
+          <h2 id="editor-modal-title">选择编辑器应用</h2>
+          <button type="button" className="icon-btn" aria-label="关闭弹窗" onClick={onClose}>
+            <IconClose />
+          </button>
         </div>
         <div className="modal-body">
-          <p className="form-hint" style={{ marginBottom: 4 }}>选择用于打开冲突文件的 .exe 程序，将加入编辑器列表。</p>
+          <p className="form-hint" style={{ marginBottom: 4 }}>
+            选择用于打开冲突文件的 .exe 程序，将加入编辑器列表。
+          </p>
           <div className="form-group">
-            <label>显示名称</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 Vim" />
+            <label htmlFor="editor-name">显示名称</label>
+            <input
+              id="editor-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例如 Vim"
+            />
           </div>
           <div className="form-group">
-            <label>应用程序路径</label>
+            <label htmlFor="editor-path">应用程序路径</label>
             <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ flex: 1 }} value={exe} onChange={(e) => setExe(e.target.value)} placeholder="C:\...\editor.exe" />
-              <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={mockBrowse}><IconFolder /> 浏览</button>
+              <input
+                id="editor-path"
+                style={{ flex: 1 }}
+                value={exe}
+                onChange={(e) => setExe(e.target.value)}
+                placeholder="C:\...\editor.exe"
+              />
+              <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={mockBrowse}>
+                <IconFolder /> 浏览
+              </button>
             </div>
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" disabled={!name || !exe} onClick={() => onSave({ name, exe })}>添加</button>
+          <button className="btn btn-ghost" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={!name || !exe}
+            onClick={() => onSave({ name, exe })}
+          >
+            添加
+          </button>
         </div>
       </div>
     </div>
@@ -393,152 +497,35 @@ function EditorSettings({ editors, selectedId, onSelect, onAdd, onRemove }) {
       </p>
       <div className="editor-option-list">
         {editors.map((ed) => (
-          <button
-            key={ed.id}
-            type="button"
-            className={`editor-option${selectedId === ed.id ? " selected" : ""}`}
-            onClick={() => onSelect(ed.id)}
-          >
-            <span className="editor-option-radio"></span>
-            <span className="editor-option-info">
-              <div className="editor-option-name">{ed.name}</div>
-              <div className="editor-option-exe">{ed.exe}</div>
-            </span>
+          <div key={ed.id} className={`editor-option${selectedId === ed.id ? " selected" : ""}`}>
+            <button
+              type="button"
+              className="editor-option-main"
+              aria-pressed={selectedId === ed.id}
+              onClick={() => onSelect(ed.id)}
+            >
+              <span className="editor-option-radio"></span>
+              <span className="editor-option-info">
+                <span className="editor-option-name">{ed.name}</span>
+                <span className="editor-option-exe">{ed.exe}</span>
+              </span>
+            </button>
             {ed.custom && (
               <button
+                type="button"
                 className="icon-btn danger"
-                title="移除"
-                onClick={(e) => { e.stopPropagation(); onRemove(ed.id); }}
+                aria-label={`移除 ${ed.name}`}
+                onClick={() => onRemove(ed.id)}
               >
                 <IconTrash />
               </button>
             )}
-          </button>
+          </div>
         ))}
       </div>
-      <button className="btn btn-ghost" onClick={onAdd}><IconPlus /> 添加编辑器应用</button>
-    </div>
-  );
-}
-
-function ConflictCompareView({ conflict, targetPath, editors, selectedEditorId, onSelectEditor, onBrowseEditor, onOpenWithEditor, onMarkResolved, resolved }) {
-  const editor = editors.find((e) => e.id === selectedEditorId);
-  if (!conflict) {
-    return (
-      <div className="conflict-compare">
-        <div className="empty-state"><p>选择左侧冲突文件查看两边差异</p></div>
-      </div>
-    );
-  }
-
-  const rows = alignConflictLines(conflict.before, conflict.after);
-  const [lo, hi] = conflict.overlapLines || [];
-
-  return (
-    <div className="conflict-compare">
-      <div className="conflict-compare-toolbar">
-        <span className="conflict-compare-path">{conflict.path}</span>
-        <div className="conflict-compare-actions">
-          <EditorOpenMenu
-            editors={editors}
-            selectedId={selectedEditorId}
-            onSelect={onSelectEditor}
-            onOpen={(editorId) => onOpenWithEditor(conflict, editorId)}
-            onAddCustom={onBrowseEditor}
-          />
-          {!resolved && (
-            <button type="button" className="conflict-action-btn conflict-action-btn--resolve" onClick={() => onMarkResolved(conflict.id)}>
-              <IconCheck />
-              标记已解决
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="conflict-compare-header">
-        <span>目标仓库（当前）</span>
-        <span>迁入变更（期望）</span>
-      </div>
-      <div className="conflict-compare-body">
-        {rows.map((row, i) => {
-          const rowClass = row.kind === "same" ? "" : row.kind;
-          return (
-            <div key={i} className={`conflict-row${rowClass ? ` ${rowClass}` : ""}`}>
-              <div className={`conflict-cell${row.left === null ? " empty" : ""}`}>
-                <span className="conflict-ln">{row.left !== null ? row.lineNo : ""}</span>
-                <span className="conflict-code">{row.left ?? ""}</span>
-              </div>
-              <div className={`conflict-cell${row.right === null ? " empty" : ""}`}>
-                <span className="conflict-ln">{row.right !== null ? row.lineNo : ""}</span>
-                <span className="conflict-code">{row.right ?? ""}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="conflict-compare-hint">
-        {lo && hi
-          ? `高亮行 ${lo}–${hi} 为重叠冲突区域。确认差异后，可在外部编辑器中修改并标记已解决。`
-          : "左右并排对比目标现状与迁入期望。复杂修改可用外部编辑器打开。"}
-        {editor && (
-          <span> 将使用 <code>{editor.name}</code> 打开文件。</span>
-        )}
-        {targetPath && (
-          <span> 文件路径：<code>{targetPath}\\{conflict.path.replace(/\//g, "\\")}</code></span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ConflictWorkspace({ conflicts, activeId, resolvedIds, target, editors, selectedEditorId, onSelectEditor, onBrowseEditor, onSelect, onOpenWithEditor, onMarkResolved }) {
-  const active = conflicts.find((c) => c.id === activeId);
-  const pending = conflicts.length - resolvedIds.size;
-
-  return (
-    <div className="conflict-workspace">
-      <div className="conflict-list">
-        {conflicts.map((cf) => {
-          const resolved = resolvedIds.has(cf.id);
-          const active = cf.id === activeId;
-          const { dir, name } = splitFilePath(cf.path);
-          return (
-            <div
-              key={cf.id}
-              className={`conflict-item${resolved ? " resolved" : ""}${active ? " active" : ""}`}
-              onClick={() => onSelect(cf.id)}
-              style={{ cursor: "pointer" }}
-            >
-              <div className="conflict-item-status">{resolved && <IconCheck />}</div>
-              <div className="conflict-item-body">
-                <div className="conflict-item-title">
-                  <StatusBadge status={cf.status} />
-                  <div className="conflict-item-path" title={cf.path}>
-                    <span className="conflict-item-name">{name}</span>
-                    {dir && <span className="conflict-item-dir">{dir}</span>}
-                  </div>
-                </div>
-                <div className="conflict-item-reason" title={cf.reason}>{cf.reason}</div>
-              </div>
-            </div>
-          );
-        })}
-        {pending > 0 && (
-          <p style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 4px 0" }}>
-            还剩 {pending} 处待解决
-          </p>
-        )}
-      </div>
-      <ConflictCompareView
-        conflict={active}
-        targetPath={target?.path}
-        editors={editors}
-        selectedEditorId={selectedEditorId}
-        onSelectEditor={onSelectEditor}
-        onBrowseEditor={onBrowseEditor}
-        onOpenWithEditor={onOpenWithEditor}
-        onMarkResolved={onMarkResolved}
-        resolved={active ? resolvedIds.has(active.id) : false}
-      />
+      <button className="btn btn-ghost" onClick={onAdd}>
+        <IconPlus /> 添加编辑器应用
+      </button>
     </div>
   );
 }
@@ -548,58 +535,112 @@ function Toast({ message, onDone }) {
     const t = setTimeout(onDone, 3200);
     return () => clearTimeout(t);
   }, [onDone]);
-  return <div className="toast">{message}</div>;
+  return (
+    <div className="toast" role="status" aria-live="polite">
+      {message}
+    </div>
+  );
 }
 
 function RepoModal({ repo, onClose, onSave }) {
   const isEdit = !!repo;
-  const [form, setForm] = useState(repo || {
-    name: "", path: "", type: "git", branch: "main", svnUser: "", svnPass: "",
-  });
+  const [form, setForm] = useState(
+    repo || {
+      name: "",
+      path: "",
+      type: "git",
+      branch: "main",
+      svnUser: "",
+      svnPass: "",
+    },
+  );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const dialogRef = useRef(null);
+  useDialogBehavior(dialogRef, onClose);
+  const modalTitleId = isEdit ? "edit-repo-title" : "add-repo-title";
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={dialogRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={modalTitleId}
+      >
         <div className="modal-header">
-          <h2>{isEdit ? "编辑仓库" : "添加仓库"}</h2>
-          <button className="icon-btn" onClick={onClose}><IconClose /></button>
+          <h2 id={modalTitleId}>{isEdit ? "编辑仓库" : "添加仓库"}</h2>
+          <button type="button" className="icon-btn" aria-label="关闭弹窗" onClick={onClose}>
+            <IconClose />
+          </button>
         </div>
         <div className="modal-body">
           <div className="form-group">
-            <label>显示名称</label>
-            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="例如 payment-service" />
+            <label htmlFor="repo-name">显示名称</label>
+            <input
+              id="repo-name"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="例如 payment-service"
+            />
           </div>
           <div className="form-group">
-            <label>本地路径</label>
+            <label htmlFor="repo-path">本地路径</label>
             <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ flex: 1 }} value={form.path} onChange={(e) => set("path", e.target.value)} placeholder="D:\Projects\my-repo" />
-              <button className="btn btn-ghost" style={{ flexShrink: 0 }}><IconFolder /> 浏览</button>
+              <input
+                id="repo-path"
+                style={{ flex: 1 }}
+                value={form.path}
+                onChange={(e) => set("path", e.target.value)}
+                placeholder="D:\Projects\my-repo"
+              />
+              <button className="btn btn-ghost" style={{ flexShrink: 0 }}>
+                <IconFolder /> 浏览
+              </button>
             </div>
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>版本控制</label>
-              <select value={form.type} onChange={(e) => set("type", e.target.value)}>
+              <label htmlFor="repo-type">版本控制</label>
+              <select
+                id="repo-type"
+                value={form.type}
+                onChange={(e) => set("type", e.target.value)}
+              >
                 <option value="git">Git</option>
                 <option value="svn">SVN</option>
               </select>
             </div>
             <div className="form-group">
-              <label>{form.type === "git" ? "分支" : "路径"}</label>
-              <input value={form.branch} onChange={(e) => set("branch", e.target.value)} placeholder={form.type === "git" ? "main" : "trunk"} />
+              <label htmlFor="repo-branch">{form.type === "git" ? "分支" : "路径"}</label>
+              <input
+                id="repo-branch"
+                value={form.branch}
+                onChange={(e) => set("branch", e.target.value)}
+                placeholder={form.type === "git" ? "main" : "trunk"}
+              />
             </div>
           </div>
           {form.type === "svn" && (
             <>
               <div className="form-row">
                 <div className="form-group">
-                  <label>SVN 用户名</label>
-                  <input value={form.svnUser} onChange={(e) => set("svnUser", e.target.value)} />
+                  <label htmlFor="svn-user">SVN 用户名</label>
+                  <input
+                    id="svn-user"
+                    value={form.svnUser}
+                    onChange={(e) => set("svnUser", e.target.value)}
+                  />
                 </div>
                 <div className="form-group">
-                  <label>密码</label>
-                  <input type="password" value={form.svnPass} onChange={(e) => set("svnPass", e.target.value)} placeholder="••••••••" />
+                  <label htmlFor="svn-pass">密码</label>
+                  <input
+                    id="svn-pass"
+                    type="password"
+                    value={form.svnPass}
+                    onChange={(e) => set("svnPass", e.target.value)}
+                    placeholder="••••••••"
+                  />
                 </div>
               </div>
               <p className="form-hint">凭据将加密保存在本地，避免每次重复输入</p>
@@ -607,8 +648,16 @@ function RepoModal({ repo, onClose, onSave }) {
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>取消</button>
-          <button className="btn btn-primary" onClick={() => onSave(form)}>保存</button>
+          <button className="btn btn-ghost" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={!form.name.trim() || !form.path.trim()}
+            onClick={() => onSave(form)}
+          >
+            保存
+          </button>
         </div>
       </div>
     </div>
@@ -618,7 +667,9 @@ function RepoModal({ repo, onClose, onSave }) {
 function CommitRowReadonly({ commit }) {
   return (
     <div className="commit-row readonly">
-      <div className="commit-check"><IconCheck /></div>
+      <div className="commit-check">
+        <IconCheck />
+      </div>
       <span className="commit-hash">{commit.hash}</span>
       <span className="commit-msg">{commit.msg}</span>
       <div className="commit-meta">
@@ -672,7 +723,9 @@ function MigrationHistory({ records, onSelect }) {
                   <div className="history-item-flow">
                     <span className="history-repo">{record.source.name}</span>
                     <VcsBadge type={record.source.type} />
-                    <span className="history-arrow"><IconArrow /></span>
+                    <span className="history-arrow">
+                      <IconArrow />
+                    </span>
                     <span className="history-repo">{record.target.name}</span>
                     <VcsBadge type={record.target.type} />
                   </div>
@@ -692,7 +745,9 @@ function MigrationHistory({ records, onSelect }) {
                     )}
                   </div>
                 </div>
-                <span className="history-item-chevron"><IconChevronRight /></span>
+                <span className="history-item-chevron">
+                  <IconChevronRight />
+                </span>
               </button>
             );
           })}
@@ -710,7 +765,9 @@ function MigrationDetail({ record, onBack }) {
     return (
       <div className="empty-state card" style={{ padding: 40 }}>
         <p>记录不存在</p>
-        <button type="button" className="btn btn-ghost" onClick={onBack}>返回列表</button>
+        <button type="button" className="btn btn-ghost" onClick={onBack}>
+          返回列表
+        </button>
       </div>
     );
   }
@@ -730,7 +787,9 @@ function MigrationDetail({ record, onBack }) {
             <div className="history-detail-flow">
               <span>{record.source.name}</span>
               <VcsBadge type={record.source.type} />
-              <span className="history-arrow"><IconArrow /></span>
+              <span className="history-arrow">
+                <IconArrow />
+              </span>
               <span>{record.target.name}</span>
               <VcsBadge type={record.target.type} />
             </div>
@@ -757,7 +816,9 @@ function MigrationDetail({ record, onBack }) {
             <span className="value">
               {record.files.length} 个（+{stats.adds} / ~{stats.mods} / −{stats.dels}）
             </span>
-            <span className="sub">+{stats.additions} / −{stats.deletions} 行</span>
+            <span className="sub">
+              +{stats.additions} / −{stats.deletions} 行
+            </span>
           </div>
           {record.conflictsResolved > 0 && (
             <div className="history-detail-cell">
@@ -805,9 +866,10 @@ function MigrationDetail({ record, onBack }) {
 
 function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
   const [search, setSearch] = useState("");
-  const filtered = repos.filter((r) =>
-    r.name.toLowerCase().includes(search.toLowerCase()) ||
-    r.path.toLowerCase().includes(search.toLowerCase())
+  const filtered = repos.filter(
+    (r) =>
+      r.name.toLowerCase().includes(search.toLowerCase()) ||
+      r.path.toLowerCase().includes(search.toLowerCase()),
   );
   return (
     <div className="repo-mgmt" data-screen-label="仓库管理">
@@ -818,7 +880,9 @@ function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button className="btn btn-primary" onClick={onAdd}><IconPlus /> 添加仓库</button>
+        <button className="btn btn-primary" onClick={onAdd}>
+          <IconPlus /> 添加仓库
+        </button>
       </div>
       <div className="card">
         <table className="repo-table">
@@ -836,14 +900,26 @@ function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
             {filtered.map((repo) => (
               <tr key={repo.id}>
                 <td style={{ fontWeight: 600 }}>{repo.name}</td>
-                <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-muted)" }}>{repo.path}</td>
-                <td><VcsBadge type={repo.type} /></td>
+                <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-muted)" }}>
+                  {repo.path}
+                </td>
+                <td>
+                  <VcsBadge type={repo.type} />
+                </td>
                 <td>{repo.branch}</td>
                 <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{repo.lastUsed}</td>
                 <td>
                   <div className="actions">
-                    <button className="icon-btn" title="编辑" onClick={() => onEdit(repo)}><IconEdit /></button>
-                    <button className="icon-btn danger" title="移除" onClick={() => onRemove(repo.id)}><IconTrash /></button>
+                    <button className="icon-btn" title="编辑" onClick={() => onEdit(repo)}>
+                      <IconEdit />
+                    </button>
+                    <button
+                      className="icon-btn danger"
+                      title="移除"
+                      onClick={() => onRemove(repo.id)}
+                    >
+                      <IconTrash />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -856,8 +932,22 @@ function RepoManagement({ repos, onAdd, onEdit, onRemove }) {
 }
 
 Object.assign(window, {
-  VcsBadge, StatusBadge, TitleBar, StepRail, RepoCard, CommitRow, CommitPicker, CommitRowReadonly,
-  FileTree, DiffView, EditorOpenMenu, EditorAppModal, EditorSettings,
-  ConflictCompareView, ConflictWorkspace, Toast,
-  RepoModal, RepoManagement, MigrationHistory, MigrationDetail,
+  VcsBadge,
+  StatusBadge,
+  TitleBar,
+  StepRail,
+  RepoCard,
+  CommitRow,
+  CommitPicker,
+  CommitRowReadonly,
+  FileTree,
+  DiffView,
+  EditorOpenMenu,
+  EditorAppModal,
+  EditorSettings,
+  Toast,
+  RepoModal,
+  RepoManagement,
+  MigrationHistory,
+  MigrationDetail,
 });

@@ -12,7 +12,12 @@ import type {
   RepoInput,
   WizardStep,
 } from "./lib/types";
-import { STEPS, COMMIT_FETCH_SIZE, defaultMappingsForSource, targetFilePath } from "./lib/constants";
+import {
+  STEPS,
+  COMMIT_FETCH_SIZE,
+  defaultMappingsForSource,
+  targetFilePath,
+} from "./lib/constants";
 import {
   buildPreviewMeta,
   buildIntegrationPlan,
@@ -46,19 +51,10 @@ import { PathMappingPanel } from "./components/relay/PathMappingPanel";
 import { VcsBadge } from "./components/relay/Badges";
 import { EditorSettings, RepoManagement } from "./components/settings/SettingsPanels";
 import { MigrationDetail, MigrationHistory } from "./components/settings/MigrationHistory";
-import {
-  IconArrow,
-  IconChevronRight,
-  IconPlus,
-  IconSuccess,
-} from "./components/relay/icons";
+import { IconArrow, IconChevronRight, IconPlus, IconSuccess } from "./components/relay/icons";
 import type { CommitListItem } from "./lib/types";
 
-type ModalState =
-  | { mode: "add" }
-  | { mode: "edit"; repo: Repo }
-  | { mode: "editor" }
-  | null;
+type ModalState = { mode: "add" } | { mode: "edit"; repo: Repo } | { mode: "editor" } | null;
 
 export default function App() {
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -94,6 +90,9 @@ export default function App() {
   const [acceptedReviewIds, setAcceptedReviewIds] = useState<Set<string>>(new Set());
   const [resolvedBlockedIds, setResolvedBlockedIds] = useState<Set<string>>(new Set());
   const [planLoading, setPlanLoading] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [focusPreview, setFocusPreview] = useState(false);
+  const [codeZoom, setCodeZoom] = useState(1);
 
   const [migrated, setMigrated] = useState(false);
   const [lastMigrationId, setLastMigrationId] = useState<string | null>(null);
@@ -112,12 +111,18 @@ export default function App() {
   );
 
   const pendingReview = useMemo(
-    () => attentionItems.filter((i) => i.integrationStatus === "review" && !acceptedReviewIds.has(i.id)),
+    () =>
+      attentionItems.filter(
+        (i) => i.integrationStatus === "review" && !acceptedReviewIds.has(i.id),
+      ),
     [attentionItems, acceptedReviewIds],
   );
 
   const pendingBlocked = useMemo(
-    () => attentionItems.filter((i) => i.integrationStatus === "blocked" && !resolvedBlockedIds.has(i.id)),
+    () =>
+      attentionItems.filter(
+        (i) => i.integrationStatus === "blocked" && !resolvedBlockedIds.has(i.id),
+      ),
     [attentionItems, resolvedBlockedIds],
   );
 
@@ -316,10 +321,10 @@ export default function App() {
       setAcceptedReviewIds(new Set());
       setResolvedBlockedIds(new Set());
       setActiveConflictId(
-        plan.items.find((i) => i.integrationStatus === "blocked")?.id
-          ?? plan.items.find((i) => i.integrationStatus === "review")?.id
-          ?? plan.items[0]?.id
-          ?? null,
+        plan.items.find((i) => i.integrationStatus === "blocked")?.id ??
+          plan.items.find((i) => i.integrationStatus === "review")?.id ??
+          plan.items[0]?.id ??
+          null,
       );
     } catch (e) {
       setToast(<span>{(e as AppErrorPayload).message}</span>);
@@ -333,6 +338,15 @@ export default function App() {
       loadIntegrationPlan();
     }
   }, [step, migrated, loadIntegrationPlan]);
+
+  useEffect(() => {
+    if (!focusPreview) return undefined;
+    const exitFocusPreview = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFocusPreview(false);
+    };
+    document.addEventListener("keydown", exitFocusPreview);
+    return () => document.removeEventListener("keydown", exitFocusPreview);
+  }, [focusPreview]);
 
   const canNext = () => {
     if (showRepos) return false;
@@ -364,11 +378,15 @@ export default function App() {
       return;
     }
     const idx = STEPS.findIndex((s) => s.id === step);
-    if (idx > 0) setStep(STEPS[idx - 1].id);
+    if (idx > 0) {
+      setFocusPreview(false);
+      setStep(STEPS[idx - 1].id);
+    }
   };
 
   const goStep = (id: WizardStep) => {
     setShowRepos(false);
+    if (id !== "migrate") setFocusPreview(false);
     setStep(id);
   };
 
@@ -410,6 +428,7 @@ export default function App() {
 
   const handleExecuteMigration = async () => {
     if (!sourceId || !targetId || !canExecuteMigration) return;
+    setFocusPreview(false);
     setMigrating(true);
     try {
       const result = await executeMigration(
@@ -523,6 +542,9 @@ export default function App() {
     setCustomMapping(false);
     setSquashCommits(false);
     setSquashCommitMessage("");
+    setSummaryExpanded(false);
+    setFocusPreview(false);
+    setCodeZoom(1);
   };
 
   const startNewMigration = () => {
@@ -617,7 +639,11 @@ export default function App() {
               <h1>选择源仓库</h1>
               <p>从已保存的仓库中选择提交来源，或添加新仓库</p>
             </div>
-            <button type="button" className="btn btn-ghost" onClick={() => setModal({ mode: "add" })}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setModal({ mode: "add" })}
+            >
               <IconPlus /> 添加仓库
             </button>
           </div>
@@ -699,7 +725,10 @@ export default function App() {
                 <span className="badge badge-del">删除</span>{" "}
                 <strong>{previewLoading ? "…" : (previewMeta?.dels ?? 0)}</strong> 个文件
               </div>
-              <div className="summary-stat" style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
+              <div
+                className="summary-stat"
+                style={{ marginLeft: "auto", color: "var(--text-muted)" }}
+              >
                 {previewLoading
                   ? "分析中…"
                   : `+${previewMeta?.totalAdditions ?? 0} / −${previewMeta?.totalDeletions ?? 0} 行`}
@@ -735,7 +764,11 @@ export default function App() {
               <h1>选择目标仓库</h1>
               <p>从已保存的仓库中选择迁移目标，或添加新仓库</p>
             </div>
-            <button type="button" className="btn btn-ghost" onClick={() => setModal({ mode: "add" })}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setModal({ mode: "add" })}
+            >
               <IconPlus /> 添加仓库
             </button>
           </div>
@@ -840,10 +873,18 @@ export default function App() {
           </div>
           <div className="main-content main-content--commits">
             {planLoading ? (
-              <div className="empty-state"><p>生成集成计划中…</p></div>
+              <div className="empty-state">
+                <p>生成集成计划中…</p>
+              </div>
             ) : integrationPlan ? (
               <ConflictWorkspace
                 items={integrationPlan.items}
+                source={source}
+                target={target}
+                commitCount={selectedCommits.size}
+                fileCount={previewMeta?.files.length ?? integrationPlan.items.length}
+                mappings={activeMappings}
+                customMapping={customMapping}
                 migrationMode={migrationMode}
                 onMigrationModeChange={handleMigrationModeChange}
                 squashCommits={squashCommits}
@@ -856,7 +897,6 @@ export default function App() {
                 activeId={activeConflictId}
                 acceptedReviewIds={acceptedReviewIds}
                 resolvedBlockedIds={resolvedBlockedIds}
-                target={target}
                 editors={editors}
                 selectedEditorId={selectedEditorId}
                 onSelectEditor={async (id) => {
@@ -870,9 +910,20 @@ export default function App() {
                 onMarkResolved={markBlockedResolved}
                 onAcceptAllReview={acceptAllReview}
                 canExecute={canExecuteMigration}
+                summaryExpanded={summaryExpanded}
+                onToggleSummary={() => setSummaryExpanded((value) => !value)}
+                focusPreview={focusPreview}
+                onToggleFocusPreview={() => {
+                  setSummaryExpanded(false);
+                  setFocusPreview((value) => !value);
+                }}
+                codeZoom={codeZoom}
+                onCodeZoomChange={(value) => setCodeZoom(Number(value.toFixed(1)))}
               />
             ) : (
-              <div className="empty-state"><p>无法生成集成计划</p></div>
+              <div className="empty-state">
+                <p>无法生成集成计划</p>
+              </div>
             )}
           </div>
         </div>
@@ -891,13 +942,18 @@ export default function App() {
           completed={completed}
           onStep={goStep}
           onManageRepos={() => {
+            setFocusPreview(false);
             setShowRepos(true);
             setSettingsTab("repos");
             setHistoryDetailId(null);
           }}
           showRepos={showRepos}
         />
-        <div className="main-area">
+        <div
+          className={`main-area${
+            !showRepos && step === "migrate" && !migrated && focusPreview ? " focus-preview" : ""
+          }`}
+        >
           {renderStep()}
           {(!migrated || showRepos) && (
             <BottomBar
@@ -915,7 +971,11 @@ export default function App() {
                 showRepos ? (
                   migrated ? (
                     <>
-                      <button type="button" className="btn btn-ghost" onClick={() => setShowRepos(false)}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => setShowRepos(false)}
+                      >
                         返回
                       </button>
                       <button type="button" className="btn btn-primary" onClick={startNewMigration}>
@@ -923,7 +983,11 @@ export default function App() {
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="btn btn-primary" onClick={() => setShowRepos(false)}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => setShowRepos(false)}
+                    >
                       返回迁移
                     </button>
                   )
