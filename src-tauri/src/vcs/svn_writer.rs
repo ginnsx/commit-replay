@@ -293,7 +293,19 @@ impl SvnWriter {
     }
 
     pub fn commit_with_message(&self, message: &str) -> Result<String> {
-        let output = self.run_svn(&["commit", "-m", message])?;
+        let message_path = std::env::temp_dir().join(format!(
+            "relay-svn-commit-{}-{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::write(&message_path, message.as_bytes())?;
+        let message_arg = message_path.to_string_lossy().into_owned();
+        let result = self.run_svn(&["commit", "--file", &message_arg, "--encoding", "UTF-8"]);
+        let _ = std::fs::remove_file(&message_path);
+        let output = result?;
         let revision = parse_commit_revision(&output)?;
         let _ = self.run_svn(&["update"]);
         Ok(revision)
