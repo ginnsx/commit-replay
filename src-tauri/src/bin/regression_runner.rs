@@ -184,6 +184,9 @@ fn main() {
                 summary.run_id, summary.passed, summary.failed, summary.skipped
             );
             if summary.failed > 0 {
+                for case in summary.cases.iter().filter(|case| case.status == "failed") {
+                    eprintln!("FAILED {}: {}", case.case_id, case.message);
+                }
                 std::process::exit(1);
             }
         }
