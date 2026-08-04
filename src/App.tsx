@@ -718,7 +718,13 @@ export default function App() {
                 setHistoryDetailId(null);
               }}
             >
-              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : tab === "history" ? "迁移记录" : "关于和更新"}
+              {tab === "repos"
+                ? "仓库"
+                : tab === "editors"
+                  ? "编辑器"
+                  : tab === "history"
+                    ? "迁移记录"
+                    : "关于和更新"}
             </button>
           ))}
         </div>

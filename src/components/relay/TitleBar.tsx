@@ -34,13 +34,28 @@ export function TitleBar({
             发现新版本 v{updateVersion}
           </button>
         ) : null}
-        <button type="button" className="win-btn" aria-label="最小化" onClick={() => void win.minimize()}>
+        <button
+          type="button"
+          className="win-btn"
+          aria-label="最小化"
+          onClick={() => void win.minimize()}
+        >
           <IconMin />
         </button>
-        <button type="button" className="win-btn" aria-label="最大化" onClick={() => void win.toggleMaximize()}>
+        <button
+          type="button"
+          className="win-btn"
+          aria-label="最大化"
+          onClick={() => void win.toggleMaximize()}
+        >
           <IconMax />
         </button>
-        <button type="button" className="win-btn close" aria-label="关闭" onClick={() => void win.close()}>
+        <button
+          type="button"
+          className="win-btn close"
+          aria-label="关闭"
+          onClick={() => void win.close()}
+        >
           <IconClose />
         </button>
       </div>

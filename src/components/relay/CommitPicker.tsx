@@ -128,7 +128,12 @@ export function CommitPicker({
                 : "没有匹配的提交"}
           </p>
           {search && (
-            <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSearch("")}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={() => setSearch("")}
+            >
               清除搜索
             </button>
           )}

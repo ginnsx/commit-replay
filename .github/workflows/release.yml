@@ -75,7 +75,17 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Relay ${{ github.ref_name }}
-          releaseBody: Windows x64 正式版本。
+          releaseBody: |
+            本次更新重点改善迁移预览体验，并为 Windows 正式版加入应用内更新能力。
+
+            ### 主要更新
+            - 新增“关于和更新”页面，可检查、下载并安装新版本；发现更新时会在标题栏提示。
+            - 优化执行摘要与文件预览的空间分配，支持收起摘要和专注预览，阅读代码更顺畅。
+            - 加强跨版本差异分析与补丁回退，降低路径变化、内容漂移等场景下的迁移失败概率。
+            - 自动识别已经中转的提交，保留必要的差异上下文，减少重复迁移。
+            - 统一迁移生成的提交说明，便于追踪来源、版本和冲突处理情况。
+
+            安装包适用于 Windows x64。应用内更新会在迁移任务完成后再执行，避免打断正在进行的操作。
           generateReleaseNotes: true
           prerelease: false
           uploadUpdaterJson: true
