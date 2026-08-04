@@ -186,7 +186,7 @@ artifacts/regression/<run_id>/
 | 套件 | 用例 |
 |------|------|
 | `smoke` | `I01-GG`, `I03-GG`, `I04-GG` |
-| `production-safety` | `I01-GG` - `I08-GG`, `D01-GG`, `D03-GG`, `D04-GG-rename`, `D05-GG-binary`, `D06-GG-crlf`, `D07-GG-empty`, `D08-GG-no-final-newline`, `D09-GG-chinese`, `D10-GG-longest-prefix`, Windows 下另含 `D11-GG-case-only-rename`, `E01-GG-partial-unmapped`, `E02-GG-directory-conflict`, `M01-GG-commit-result`, `M02-GG-strict-replay`, `M03-GG-squash`, `M04-GG-squash-empty-message`, `F10-GG-already-expected` |
+| `production-safety` | `I01-GG` - `I08-GG`, `D01-GG`, `D03-GG`, `D04-GG-rename`, `D05-GG-binary`, `D06-GG-crlf`, `D07-GG-empty`, `D08-GG-no-final-newline`, `D09-GG-chinese`, `D10-GG-longest-prefix`, Windows 下另含 `D11-GG-case-only-rename`, `E01-GG-partial-unmapped`, `E02-GG-directory-conflict`, `M01-GG-commit-result`, `M02-GG-strict-replay`, `M03-GG-squash`, `M04-GG-squash-empty-message`, `F10-GG-already-expected`, `F11-GG-context-drift-auto-merge`, `F12-GG-already-contained-skip`, `F13-GG-same-region-conflict`, `F14-GG-multiple-candidates-blocked` |
 | `release` | `production-safety` + `SG01-SVN-Git-add`, `SG02-SVN-Git-modify`, `SG03-SVN-Git-move`, `SG04-SVN-Git-multi`, `GS01-Git-SVN-add`, `GS02-Git-SVN-delete`, `GS03-Git-SVN-dirty`, `SS01-SVN-SVN-add`, `SS02-SVN-SVN-delete` |
 
 失败时优先查看：
@@ -225,7 +225,7 @@ artifacts/regression/<run_id>/cases/<case_id>/after/manifest.json
 | 文件集合 | 目标实际变更文件集合等于预期集合，不多不少 |
 | 文件内容 | 目标文件内容等于预期内容，文本和二进制都按 SHA256 校验 |
 | 提交数量 | 非 squash 模式下目标提交数等于实际应用的源提交数；squash 模式下等于 1 |
-| 提交信息 | 目标提交信息符合 Relay 生成规则或用户填写的 squash message |
+| 提交信息 | 每个 Relay 生成的目标提交都包含 `使用 Relay v{version} 合并`；squash 提交保留用户填写的首行 message，并在正文列出原 commit |
 | 集成计划 | review / blocked 项未处理完时不可执行迁移 |
 | 迁移记录 | 源仓库、目标仓库、提交、文件数、状态与实际执行结果一致 |
 
@@ -357,13 +357,15 @@ SVN 目标使用 `trunk/` 作为目标根时，以上路径位于 `trunk/` 下�
 | E01 | 干净补丁 | 目标基线与源一致 | 增量优先 | auto_ok + apply_patch |
 | E02 | 目标独立修改但不重叠 | 修改同文件其他区域 | 增量优先 | 可自动或 review，不应 blocked |
 | E03 | 目标独立修改且重叠 | 修改同一行 | 增量优先 | blocked + manual_merge |
-| E04 | 补丁上下文漂移 | 目标同语义但行号变化 | 增量优先 | review 或 blocked，不能静默错误写入 |
+| E04 | 补丁上下文漂移 | 目标同语义但行号变化 | 增量优先 | 标记 context_drift，review + write_after，确认后生成正确预览 |
 | E05 | 严格模式上下文不匹配 | 目标和源基线不同 | strict_replay | blocked |
 | E06 | 提交结果模式 | 目标和源基线不同 | commit_result | review + write_after，需确认 |
 | E07 | 删除确认 | 选择 `C03` | 任意 | review，未确认不能执行 |
 | E08 | 二进制写入确认 | 选择 `C05` | 任意 | review，未确认不能执行 |
 | E09 | blocked 未处理 | 有 blocked 项直接执行 | 任意 | 执行按钮不可用或后端拒绝 |
 | E10 | review 未确认 | 有 review 项直接执行 | 任意 | 执行按钮不可用或后端拒绝 |
+| E11 | 目标已包含 | 目标提前包含源提交结果 | 增量优先 | already_contains + skip，不重复改文件 |
+| E12 | 多候选定位 | 同一 old block 在目标出现多次 | 增量优先 | multiple_candidates + blocked，不自动选择 |
 
 #### F. 迁移执行
 
@@ -374,11 +376,15 @@ SVN 目标使用 `trunk/` 作为目标根时，以上路径位于 `trunk/` 下�
 | F03 | Git -> SVN 单提交 | `DS-GS` 选择 `C02` | 目标新增 1 个 SVN revision |
 | F04 | SVN -> SVN 单 revision | `DS-SS` 选择 `C02` | 目标新增 1 个 SVN revision |
 | F05 | 多提交逐条迁移 | 选择 `C01`、`C02`、`C03` | 目标提交数为 3，最终文件树符合预期 |
-| F06 | 多提交 squash | 选择 `C01`、`C02`、`C03`，开启 squash | 目标提交数为 1，commit message 为用户填写内容 |
+| F06 | 多提交 squash | 选择 `C01`、`C02`、`C03`，开启 squash | 目标提交数为 1，commit message 首行为用户填写内容，正文包含 Relay 版本和原 commit 列表 |
 | F07 | squash 未填 message | 开启 squash，message 为空 | 不允许执行 |
 | F08 | 失败回滚 | 人为制造一个执行中必失败文件 | 失败后目标回到 baseline，无半应用文件 |
 | F09 | 空净变更 | 选择 `C09` + `C10` | 不产生多余文件；提交行为需符合产品定义并稳定 |
-| F10 | 目标工作区已有期望内容 | 目标提前应用同样内容 | 不重复写入，不产生额外无意义差异 |
+| F10 | 目标工作区已有期望内容 | 目标提前应用同样内容 | 不重复写入，不新增 Relay 提交 |
+| F11 | 上下文漂移自动合并 | 目标文件行号漂移但 old block 唯一 | 用户确认 review 后目标内容为合并结果 |
+| F12 | 目标已包含跳过 | 目标提前应用同样内容 | 目标文件保持不变，不新增 Relay 提交 |
+| F13 | 同区域冲突阻断 | 目标同一行已有独立修改 | 执行前 blocked，目标保持不变 |
+| F14 | 多候选阻断 | 同一 old block 出现多次 | 执行前 blocked，目标保持不变 |
 
 #### G. 人工处理流程
 
@@ -465,9 +471,9 @@ npm run tauri dev
 
 1. 在源仓库步骤选择或新增 Git/SVN 源仓库。
 2. 在选择提交步骤拉取提交列表，勾选一个或多个提交。
-3. 在目标仓库步骤选择目标仓库，并配置路径映射。
-4. 在变更预览步骤生成预览，核对文件树、行级 diff 和集成计划。
-5. 在确认迁移步骤处理 review / blocked 项，执行迁移后检查目标仓库和迁移历史。
+3. 在变更预览步骤生成源提交 base -> after 预览，核对文件树和行级 diff。
+4. 在目标仓库步骤选择目标仓库，并配置路径映射。
+5. 在确认迁移步骤核对集成计划，处理 review / blocked 项，执行迁移后检查目标仓库和迁移历史。
 
 手动验证必须额外用 Git/SVN CLI 检查目标工作区，不只看 UI 成功提示。
 

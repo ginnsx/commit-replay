@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::{
+    commit_message,
     error::AppError,
     preview::{
         build_integration_plan, build_preview_plan_parallel, patch_apply::resolve_target_after,
@@ -76,6 +77,22 @@ fn unit_apply_strategy(
     } else {
         eff
     }
+}
+
+fn unit_has_applicable_changes(
+    unit: &crate::model::PreviewUnit,
+    strategies: &std::collections::HashMap<String, IntegrationStrategy>,
+) -> bool {
+    unit.files.iter().any(|fc| {
+        let Some(target_path) = fc.target_path.as_deref() else {
+            return true;
+        };
+        strategies
+            .get(target_path)
+            .copied()
+            .unwrap_or(IntegrationStrategy::ApplyPatch)
+            != IntegrationStrategy::Skip
+    })
 }
 
 fn prepare_finalize_file(
@@ -243,6 +260,9 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
                 ))
             })
             .collect();
+        if !unit_has_applicable_changes(unit, &unit_strategies) {
+            continue;
+        }
         let apply = writer.apply_changeset_with_strategies(
             &crate::model::ChangeSet {
                 meta: unit.meta.clone(),
@@ -258,7 +278,8 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            if let Err(err) = writer.commit_allow_empty(&unit.meta, "relay: {message}") {
+            let message = commit_message::replay_message(&unit.meta);
+            if let Err(err) = writer.commit_allow_empty(&unit.meta, &message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(err);
             }
@@ -307,7 +328,8 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             )));
         }
         if !squash_commits {
-            if let Err(err) = writer.commit_with_message("relay: finalized conflicts") {
+            let message = commit_message::finalize_message();
+            if let Err(err) = writer.commit_with_message(&message) {
                 let _ = writer.rollback(&checkpoint);
                 return Err(err);
             }
@@ -317,7 +339,10 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
 
     if squash_commits {
         let msg = squash_message.as_deref().expect("validated above");
-        if let Err(err) = writer.commit_with_message(msg) {
+        let metas: Vec<crate::model::ReplayUnitMeta> =
+            preview.units.iter().map(|u| u.meta.clone()).collect();
+        let message = commit_message::squash_message(msg, &metas);
+        if let Err(err) = writer.commit_with_message(&message) {
             let _ = writer.rollback(&checkpoint);
             return Err(err);
         }
@@ -428,7 +453,10 @@ pub async fn execute_migration(
         .0
         .lock()
         .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let commit_refs: Vec<String> = output.record.commits.iter().map(|c| c.id.clone()).collect();
+    let relayed_at = output.record.completed_at.clone();
     save_migration(&conn, output.record)?;
+    crate::store::db::record_relayed_commits(&conn, &source_id, &commit_refs, &relayed_at)?;
 
     Ok(output.result)
 }

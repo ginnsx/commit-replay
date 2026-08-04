@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AppErrorPayload,
+  AvailableUpdate,
   Editor,
   IntegrationItemView,
   IntegrationPlanResult,
@@ -19,21 +20,24 @@ import {
   targetFilePath,
 } from "./lib/constants";
 import {
-  buildPreviewMeta,
+  buildSourcePreviewMeta,
   buildIntegrationPlan,
   deleteEditor,
   deleteRepo,
   executeMigration,
   getDefaultEditorId,
+  getUpdateCheckState,
   getRepoPairMappings,
   listEditors,
   listMigrations,
+  listRelayedCommits,
   listRepoCommits,
   listRepos,
   openFileInEditor,
   saveEditor,
   saveRepoPairMappings,
   saveRepo,
+  saveUpdateCheckState,
   setDefaultEditor,
   validateMigrationCombo,
 } from "./lib/invoke";
@@ -50,9 +54,20 @@ import { ConflictWorkspace } from "./components/relay/ConflictWorkspace";
 import { PathMappingPanel } from "./components/relay/PathMappingPanel";
 import { VcsBadge } from "./components/relay/Badges";
 import { EditorSettings, RepoManagement } from "./components/settings/SettingsPanels";
+import { UpdateSettings } from "./components/settings/UpdateSettings";
 import { MigrationDetail, MigrationHistory } from "./components/settings/MigrationHistory";
 import { IconArrow, IconChevronRight, IconPlus, IconSuccess } from "./components/relay/icons";
 import type { CommitListItem } from "./lib/types";
+import {
+  checkForUpdate,
+  getAppVersion,
+  installUpdate,
+  isUpdateSupported,
+  shouldAutoCheck,
+  type DownloadProgress,
+  type PendingUpdate,
+  type UpdateStatus,
+} from "./lib/update";
 
 type ModalState = { mode: "add" } | { mode: "edit"; repo: Repo } | { mode: "editor" } | null;
 
@@ -64,7 +79,9 @@ export default function App() {
 
   const [step, setStep] = useState<WizardStep>("source");
   const [showRepos, setShowRepos] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"repos" | "editors" | "history">("repos");
+  const [settingsTab, setSettingsTab] = useState<"repos" | "editors" | "history" | "updates">(
+    "repos",
+  );
   const [historyDetailId, setHistoryDetailId] = useState<string | null>(null);
 
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -77,6 +94,7 @@ export default function App() {
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<AppErrorPayload | null>(null);
   const [lastBatchSize, setLastBatchSize] = useState(0);
+  const [relayedCommits, setRelayedCommits] = useState<Set<string>>(new Set());
 
   const [previewMeta, setPreviewMeta] = useState<PreviewMetaResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -97,6 +115,17 @@ export default function App() {
   const [migrated, setMigrated] = useState(false);
   const [lastMigrationId, setLastMigrationId] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
+
+  const updateSupported = isUpdateSupported();
+  const [appVersion, setAppVersion] = useState("—");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(() =>
+    updateSupported ? "idle" : "unsupported",
+  );
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState<string>();
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate>();
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
+  const [updateError, setUpdateError] = useState<string>();
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>();
 
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<ReactNode>(null);
@@ -172,11 +201,105 @@ export default function App() {
     setMigrations(await listMigrations());
   }, []);
 
+  const runUpdateCheck = useCallback(
+    async (manual: boolean) => {
+      if (!updateSupported) {
+        setUpdateStatus("unsupported");
+        return;
+      }
+      setUpdateStatus("checking");
+      setUpdateError(undefined);
+      try {
+        const pending = await checkForUpdate();
+        const saved = await saveUpdateCheckState({
+          lastCheckedAt: new Date().toISOString(),
+          availableUpdate: pending?.info,
+        });
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        setPendingUpdate(pending);
+        setUpdateStatus(pending ? "available" : "latest");
+      } catch (e) {
+        setUpdateStatus(manual ? "failed" : "idle");
+        if (manual) setUpdateError((e as AppErrorPayload).message);
+      }
+    },
+    [updateSupported],
+  );
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (migrating || !updateSupported) return;
+    setUpdateError(undefined);
+    try {
+      let nextPending = pendingUpdate;
+      if (!nextPending) {
+        setUpdateStatus("checking");
+        nextPending = await checkForUpdate();
+        if (!nextPending) {
+          const saved = await saveUpdateCheckState({ lastCheckedAt: new Date().toISOString() });
+          setLastUpdateCheckAt(saved.lastCheckedAt);
+          setAvailableUpdate(undefined);
+          setUpdateStatus("latest");
+          return;
+        }
+        const saved = await saveUpdateCheckState({
+          lastCheckedAt: new Date().toISOString(),
+          availableUpdate: nextPending.info,
+        });
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        setPendingUpdate(nextPending);
+      }
+      setDownloadProgress(undefined);
+      setUpdateStatus("downloading");
+      await installUpdate(nextPending, setDownloadProgress);
+    } catch (e) {
+      setUpdateStatus("failed");
+      setUpdateError((e as AppErrorPayload).message);
+    }
+  }, [migrating, pendingUpdate, updateSupported]);
+
+  const loadRelayedCommits = useCallback(async () => {
+    if (!sourceId) {
+      setRelayedCommits(new Set());
+      return;
+    }
+    const refs = await listRelayedCommits(sourceId);
+    setRelayedCommits(new Set(refs));
+  }, [sourceId]);
+
   useEffect(() => {
     refreshRepos().catch((e: AppErrorPayload) => setGlobalError(e.message));
     refreshEditors().catch(() => undefined);
     refreshMigrations().catch(() => undefined);
   }, [refreshRepos, refreshEditors, refreshMigrations]);
+
+  useEffect(() => {
+    getAppVersion()
+      .then(setAppVersion)
+      .catch(() => undefined);
+    if (!updateSupported) return;
+    let cancelled = false;
+    const loadUpdateState = async () => {
+      try {
+        const saved = await getUpdateCheckState();
+        if (cancelled) return;
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        if (shouldAutoCheck(saved.lastCheckedAt)) {
+          await runUpdateCheck(false);
+        } else if (saved.availableUpdate) {
+          setUpdateStatus("available");
+        }
+      } catch {
+        // 自动检查失败不应影响迁移工作流。
+      }
+    };
+    void loadUpdateState();
+    return () => {
+      cancelled = true;
+    };
+  }, [runUpdateCheck, updateSupported]);
 
   const loadCommits = useCallback(
     async (reset = false) => {
@@ -207,6 +330,7 @@ export default function App() {
       setLastBatchSize(0);
       setCommits([]);
       loadCommits(true);
+      loadRelayedCommits().catch(() => undefined);
     }
   }, [step, sourceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -234,11 +358,6 @@ export default function App() {
       cancelled = true;
     };
   }, [sourceId, targetId, source?.type, source?.branch]);
-
-  useEffect(() => {
-    if (!sourceId || !targetId) return;
-    setPreviewMeta(null);
-  }, [sourceId, targetId, customMapping, pathMappings]);
 
   const persistPairMappings = useCallback(
     (mappings: PathMapping[], custom: boolean) => {
@@ -281,13 +400,12 @@ export default function App() {
   }, [activeFileId, previewMeta]);
 
   const loadPreview = useCallback(async () => {
-    if (!sourceId || !targetId || sourceRefs.length === 0) return;
+    if (!sourceId || sourceRefs.length === 0) return;
     setPreviewLoading(true);
     setPreviewMeta(null);
     setActiveFileId(null);
     try {
-      await validateMigrationCombo(sourceId, targetId);
-      const meta = await buildPreviewMeta(sourceId, targetId, sourceRefs, activeMappings);
+      const meta = await buildSourcePreviewMeta(sourceId, sourceRefs);
       setPreviewMeta(meta);
       if (meta.files.length > 0) {
         setActiveFileId(meta.files[0].id);
@@ -298,13 +416,13 @@ export default function App() {
     } finally {
       setPreviewLoading(false);
     }
-  }, [sourceId, targetId, sourceRefs, activeMappings]);
+  }, [sourceId, sourceRefs]);
 
   useEffect(() => {
-    if (step === "preview" && sourceId && targetId) {
+    if (step === "preview" && sourceId) {
       loadPreview();
     }
-  }, [step, sourceId, targetId, loadPreview]);
+  }, [step, sourceId, loadPreview]);
 
   const loadIntegrationPlan = useCallback(async () => {
     if (!sourceId || !targetId || sourceRefs.length === 0) return;
@@ -447,6 +565,7 @@ export default function App() {
       setMigrated(true);
       await saveRepoPairMappings(sourceId, targetId, activeMappings, customMapping);
       await refreshMigrations();
+      await loadRelayedCommits();
     } catch (e) {
       setToast(<span>{(e as AppErrorPayload).message}</span>);
     } finally {
@@ -508,6 +627,8 @@ export default function App() {
   };
 
   const toggleCommit = useCallback((id: string) => {
+    setPreviewMeta(null);
+    setActiveFileId(null);
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -517,6 +638,8 @@ export default function App() {
   }, []);
 
   const selectCommits = useCallback((ids: string[], select: boolean) => {
+    setPreviewMeta(null);
+    setActiveFileId(null);
     setSelectedCommits((prev) => {
       const next = new Set(prev);
       ids.forEach((id) => {
@@ -557,12 +680,13 @@ export default function App() {
     if (showRepos) {
       if (settingsTab === "repos") return `${repos.length} 个已保存仓库`;
       if (settingsTab === "editors") return `默认编辑器：${selectedEditor?.name ?? "未选择"}`;
+      if (settingsTab === "updates") return `当前版本 v${appVersion}`;
       if (historyDetailId) return "迁移记录明细";
       return `${migrations.length} 条迁移记录`;
     }
     if (step === "source" && !sourceId) return "请选择一个源仓库";
     if (step === "commits") return `已选择 ${selectedCommits.size} 条提交`;
-    if (step === "preview") return `${previewMeta?.files.length ?? 0} 个文件待迁移`;
+    if (step === "preview") return `${previewMeta?.files.length ?? 0} 个源文件变更`;
     if (step === "target" && !targetId) return "请选择目标仓库";
     if (step === "target" && targetId === sourceId) return "目标不能与源相同";
     if (step === "migrate" && !canExecuteMigration) {
@@ -584,7 +708,7 @@ export default function App() {
       </div>
       <div className="main-content main-content--scroll">
         <div className="settings-tabs">
-          {(["repos", "editors", "history"] as const).map((tab) => (
+          {(["repos", "editors", "history", "updates"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -594,7 +718,7 @@ export default function App() {
                 setHistoryDetailId(null);
               }}
             >
-              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : "迁移记录"}
+              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : tab === "history" ? "迁移记录" : "关于和更新"}
             </button>
           ))}
         </div>
@@ -615,6 +739,20 @@ export default function App() {
             }}
             onAdd={() => setModal({ mode: "editor" })}
             onRemove={handleRemoveEditor}
+          />
+        ) : settingsTab === "updates" ? (
+          <UpdateSettings
+            appVersion={appVersion}
+            status={updateStatus}
+            lastCheckedAt={lastUpdateCheckAt}
+            availableUpdate={availableUpdate}
+            error={updateError}
+            progress={downloadProgress}
+            migrating={migrating}
+            supported={updateSupported}
+            onCheck={() => void runUpdateCheck(true)}
+            onInstall={() => void handleInstallUpdate()}
+            onLater={() => setSettingsTab("repos")}
           />
         ) : historyDetailId ? (
           <MigrationDetail
@@ -655,7 +793,11 @@ export default function App() {
                   key={repo.id}
                   repo={repo}
                   selected={sourceId === repo.id}
-                  onClick={() => setSourceId(repo.id)}
+                  onClick={() => {
+                    setSourceId(repo.id);
+                    setPreviewMeta(null);
+                    setActiveFileId(null);
+                  }}
                 />
               ))}
             </div>
@@ -673,6 +815,7 @@ export default function App() {
               <p>
                 来自 <strong>{source?.name}</strong> · 最近 {commits.length} 条提交，已选{" "}
                 {selectedCommits.size} 条
+                {relayedCommits.size > 0 ? `，${relayedCommits.size} 条已提交` : ""}
               </p>
             </div>
           </div>
@@ -690,6 +833,7 @@ export default function App() {
             <CommitPicker
               commits={commits}
               selectedIds={selectedCommits}
+              relayedIds={relayedCommits}
               onToggle={toggleCommit}
               onSelectMany={selectCommits}
               hasRemoteMore={lastBatchSize === COMMIT_FETCH_SIZE}
@@ -708,7 +852,7 @@ export default function App() {
           <div className="main-header">
             <div>
               <h1>变更预览</h1>
-              <p>{selectedCommits.size} 条提交 · 合并后净变更</p>
+              <p>{selectedCommits.size} 条提交 · 源提交 base -&gt; after 净变更</p>
             </div>
           </div>
           <div className="main-content">
@@ -737,11 +881,11 @@ export default function App() {
             <div className="preview-layout">
               {previewLoading ? (
                 <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                  <p>正在分析合并后的变更…</p>
+                  <p>正在分析所选提交的 base -&gt; after 变更…</p>
                 </div>
               ) : files.length === 0 ? (
                 <div className="empty-state" style={{ gridColumn: "1 / -1" }}>
-                  <p>所选提交合并后无净变更</p>
+                  <p>所选提交 base -&gt; after 无净变更</p>
                 </div>
               ) : (
                 <>
@@ -935,7 +1079,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar />
+      <TitleBar
+        updateVersion={availableUpdate?.version}
+        onOpenUpdate={() => {
+          setShowRepos(true);
+          setSettingsTab("updates");
+          setHistoryDetailId(null);
+        }}
+      />
       <div className="body">
         <StepRail
           current={showRepos ? null : step}

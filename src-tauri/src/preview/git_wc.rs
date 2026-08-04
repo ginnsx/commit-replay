@@ -128,6 +128,7 @@ fn apply_patch_or_lines(
     if let Some(b) = before {
         if let Ok(next) = super::patch_apply::apply_unified_patch_by_search(b, patch) {
             if normalize_lines(&next) != normalize_lines(b) {
+                let next = preserve_trailing_newline(b, next);
                 if let Some(source_after) = source_after {
                     if equivalent_text(&next, source_after) {
                         return Ok(source_after.to_string());
@@ -142,6 +143,13 @@ fn apply_patch_or_lines(
 
 fn normalize_lines(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn preserve_trailing_newline(base: &str, mut next: String) -> String {
+    if base.ends_with('\n') && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next
 }
 
 fn equivalent_text(a: &str, b: &str) -> bool {
@@ -177,5 +185,15 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(after, git_before);
+    }
+
+    #[test]
+    fn derive_after_search_preserves_target_trailing_newline() {
+        let patch = "@@ -1,3 +1,3 @@\n alpha\n-old\n+new\n omega\n";
+        let before = "header\nalpha\nold\nomega\nfooter\n";
+        let after = derive_after(Some(before), Some(patch), &FileChangeKind::Modify, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after, "header\nalpha\nnew\nomega\nfooter\n");
     }
 }

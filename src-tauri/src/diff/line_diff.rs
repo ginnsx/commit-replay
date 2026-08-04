@@ -3,6 +3,7 @@ use similar::{ChangeTag, TextDiff};
 use crate::store::models::{DiffLine, DiffLineType};
 
 const MAX_DIFF_LINES: usize = 5000;
+pub const DEFAULT_DIFF_CONTEXT_LINES: usize = 3;
 
 fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
@@ -153,6 +154,53 @@ pub fn count_line_stats(diff: &[DiffLine]) -> (u32, u32) {
     (additions, deletions)
 }
 
+pub fn diff_with_context(lines: Vec<DiffLine>, context_lines: usize) -> Vec<DiffLine> {
+    let changed_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| (!matches!(line.line_type, DiffLineType::Ctx)).then_some(i))
+        .collect();
+
+    if changed_indices.is_empty() {
+        return Vec::new();
+    }
+
+    let mut keep = vec![false; lines.len()];
+    for i in changed_indices {
+        let start = i.saturating_sub(context_lines);
+        let end = (i + context_lines + 1).min(lines.len());
+        for selected in keep.iter_mut().take(end).skip(start) {
+            *selected = true;
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut previous_index: Option<usize> = None;
+    for (i, line) in lines.into_iter().enumerate() {
+        if !keep[i] {
+            continue;
+        }
+        if previous_index.is_none_or(|prev| i > prev + 1) {
+            out.push(omitted_context_line());
+        }
+        out.push(line);
+        previous_index = Some(i);
+    }
+    if previous_index.is_some_and(|prev| prev + 1 < keep.len()) {
+        out.push(omitted_context_line());
+    }
+    out
+}
+
+fn omitted_context_line() -> DiffLine {
+    DiffLine {
+        line_type: DiffLineType::Ctx,
+        old: None,
+        new: None,
+        text: "...".into(),
+    }
+}
+
 pub fn find_overlap_lines(before: &[String], after: &[String]) -> Option<[u32; 2]> {
     let diff = lines_to_diff(
         lines_vec_to_text(before).as_deref(),
@@ -226,5 +274,38 @@ mod tests {
         let (add, del) = count_line_stats(&lines);
         assert_eq!(del, 0);
         assert_eq!(add, 1);
+    }
+
+    #[test]
+    fn diff_with_context_keeps_nearby_lines_only() {
+        let before = "one\ntwo\nthree\nfour\nold\nsix\nseven\neight\nnine\n";
+        let after = "one\ntwo\nthree\nfour\nnew\nsix\nseven\neight\nnine\n";
+        let lines = diff_with_context(lines_to_diff(Some(before), Some(after)), 2);
+
+        assert_eq!(lines.first().map(|l| l.text.as_str()), Some("..."));
+        assert_eq!(lines.last().map(|l| l.text.as_str()), Some("..."));
+        assert!(lines.iter().any(|l| l.text == "three"));
+        assert!(lines.iter().any(|l| l.text == "seven"));
+        assert!(!lines.iter().any(|l| l.text == "one"));
+        assert!(!lines.iter().any(|l| l.text == "nine"));
+        assert!(lines
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Del) && l.text == "old"));
+        assert!(lines
+            .iter()
+            .any(|l| matches!(l.line_type, DiffLineType::Add) && l.text == "new"));
+    }
+
+    #[test]
+    fn diff_with_context_merges_overlapping_context() {
+        let before = "one\ntwo\nold-a\nfour\nold-b\nsix\n";
+        let after = "one\ntwo\nnew-a\nfour\nnew-b\nsix\n";
+        let lines = diff_with_context(lines_to_diff(Some(before), Some(after)), 1);
+        let omitted_count = lines.iter().filter(|l| l.text == "...").count();
+
+        assert_eq!(omitted_count, 1);
+        assert!(lines.iter().any(|l| l.text == "four"));
+        assert!(lines.iter().any(|l| l.text == "old-a"));
+        assert!(lines.iter().any(|l| l.text == "new-b"));
     }
 }

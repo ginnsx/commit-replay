@@ -7,12 +7,15 @@ use tauri::{AppHandle, Manager};
 use super::crypto::{decrypt_secret, encrypt_secret};
 use super::models::{
     default_svn_mappings, EditorRecord, MigrationRecord, RepoInput, RepoPairMappingInput,
-    RepoPairMappingRecord, RepoPairMappingView, RepoRecord, RepoType, RepoView, EDITOR_PRESETS,
+    RepoPairMappingRecord, RepoPairMappingView, RepoRecord, RepoType, RepoView, UpdateCheckState,
+    EDITOR_PRESETS,
 };
 use crate::error::{AppError, Result};
 use crate::mapper::PathMapping;
 
 pub struct DbState(pub Mutex<Connection>);
+
+const UPDATE_CHECK_STATE_KEY: &str = "update_check_state";
 
 fn db_err(e: rusqlite::Error) -> AppError {
     AppError::Other(anyhow::anyhow!("db: {e}"))
@@ -58,10 +61,79 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             data TEXT NOT NULL,
             PRIMARY KEY (source_id, target_id)
         );
+        CREATE TABLE IF NOT EXISTS relayed_commits (
+            source_id TEXT NOT NULL,
+            commit_ref TEXT NOT NULL,
+            relayed_at TEXT NOT NULL,
+            PRIMARY KEY (source_id, commit_ref)
+        );
         ",
     )
     .map_err(db_err)?;
+    backfill_relayed_commits(conn)?;
     Ok(())
+}
+
+fn repo_path_key(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+fn backfill_relayed_commits(conn: &Connection) -> Result<()> {
+    let repos = list_repos(conn)?;
+    let migrations = list_migrations(conn)?;
+    for m in migrations {
+        if m.status != "success" {
+            continue;
+        }
+        let path_key = repo_path_key(&m.source.path);
+        let Some(source_id) = repos
+            .iter()
+            .find(|r| repo_path_key(&r.path) == path_key)
+            .map(|r| r.id.as_str())
+        else {
+            continue;
+        };
+        for c in &m.commits {
+            conn.execute(
+                "INSERT OR IGNORE INTO relayed_commits (source_id, commit_ref, relayed_at) VALUES (?1, ?2, ?3)",
+                params![source_id, c.id, m.completed_at],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn record_relayed_commits(
+    conn: &Connection,
+    source_id: &str,
+    commit_refs: &[String],
+    relayed_at: &str,
+) -> Result<()> {
+    for commit_ref in commit_refs {
+        conn.execute(
+            "INSERT OR REPLACE INTO relayed_commits (source_id, commit_ref, relayed_at) VALUES (?1, ?2, ?3)",
+            params![source_id, commit_ref, relayed_at],
+        )
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+pub fn list_relayed_commits(conn: &Connection, source_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn
+        .prepare("SELECT commit_ref FROM relayed_commits WHERE source_id = ?1")
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map(params![source_id], |row| row.get(0))
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(db_err)?);
+    }
+    Ok(out)
 }
 
 
@@ -388,6 +460,30 @@ pub fn save_migration(conn: &Connection, record: MigrationRecord) -> Result<Migr
     Ok(record)
 }
 
+pub fn get_update_check_state(conn: &Connection) -> Result<UpdateCheckState> {
+    match conn.query_row(
+        "SELECT value FROM app_state WHERE key = ?1",
+        params![UPDATE_CHECK_STATE_KEY],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(json) => serde_json::from_str(&json).map_err(|e| AppError::Other(anyhow::anyhow!("{e}"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(UpdateCheckState::default()),
+        Err(e) => Err(db_err(e)),
+    }
+}
+
+pub fn save_update_check_state(conn: &Connection, state: UpdateCheckState) -> Result<UpdateCheckState> {
+    let json = serde_json::to_string(&state)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![UPDATE_CHECK_STATE_KEY, json],
+    )
+    .map_err(db_err)?;
+    Ok(state)
+}
+
 pub fn repo_path_mappings(repo: &RepoRecord) -> Vec<PathMapping> {
     if repo.path_mappings.is_empty() {
         match repo.repo_type {
@@ -446,4 +542,32 @@ pub fn save_repo_pair_mapping(
         path_mappings: record.path_mappings,
         custom_mapping: record.custom_mapping,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_check_state_round_trips_through_app_state() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        let state = UpdateCheckState {
+            last_checked_at: Some("2026-08-04T00:00:00Z".into()),
+            available_version: Some("0.3.1".into()),
+            available_notes: Some("修复迁移预览问题".into()),
+            available_date: None,
+        };
+
+        assert_eq!(save_update_check_state(&conn, state.clone()).unwrap(), state);
+        assert_eq!(get_update_check_state(&conn).unwrap(), state);
+    }
+
+    #[test]
+    fn update_check_state_defaults_when_not_saved() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        assert_eq!(get_update_check_state(&conn).unwrap(), UpdateCheckState::default());
+    }
 }

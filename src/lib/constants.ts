@@ -6,8 +6,8 @@ export const COMMIT_FETCH_SIZE = 200;
 export const STEPS: { id: WizardStep; label: string; num: number }[] = [
   { id: "source", label: "源仓库", num: 1 },
   { id: "commits", label: "选择提交", num: 2 },
-  { id: "target", label: "目标仓库", num: 3 },
-  { id: "preview", label: "变更预览", num: 4 },
+  { id: "preview", label: "变更预览", num: 3 },
+  { id: "target", label: "目标仓库", num: 4 },
   { id: "migrate", label: "迁移", num: 5 },
 ];
 

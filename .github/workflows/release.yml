@@ -1,0 +1,83 @@
+name: 发布 Relay
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: 构建并发布 Windows 安装包
+    runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 校验版本和签名配置
+        shell: pwsh
+        run: |
+          $packageVersion = node -p "require('./package.json').version"
+          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          if ($packageVersion -ne $tagVersion) {
+            throw "发布标签 ${{ github.ref_name }} 与 package.json 版本 $packageVersion 不一致"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "缺少 TAURI_SIGNING_PRIVATE_KEY 保密配置"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PUBLIC_KEY)) {
+            throw "缺少 TAURI_SIGNING_PUBLIC_KEY 仓库变量"
+          }
+
+      - name: 安装 SVN 回归依赖
+        shell: pwsh
+        run: choco install subversion --no-progress --yes
+
+      - name: 前端检查
+        run: |
+          npm test
+          npm run lint
+          npm run format:check
+
+      - name: Rust 检查
+        working-directory: src-tauri
+        run: |
+          cargo test
+          cargo clippy
+
+      - name: 发布前迁移回归
+        shell: pwsh
+        run: npm run test:regression:release
+
+      - name: 构建、签名并发布
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Relay ${{ github.ref_name }}
+          releaseBody: Windows x64 正式版本。
+          generateReleaseNotes: true
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --bundles nsis

@@ -160,6 +160,21 @@ textarea:focus {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
+.titlebar-update {
+  align-self: center;
+  margin-right: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  font-size: 11px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.titlebar-update:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
 .win-btn {
   width: 46px;
   height: 100%;
@@ -445,6 +460,12 @@ textarea:focus {
 .badge-warn {
   background: var(--warn-bg);
   color: var(--warn);
+}
+.badge-relayed {
+  margin-left: 8px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  vertical-align: middle;
 }
 
 .card {
@@ -1719,6 +1740,78 @@ textarea:focus {
 .settings-tab.active {
   background: var(--accent-dim);
   color: var(--accent);
+}
+.update-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+.update-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-base);
+}
+.update-card > :first-child {
+  flex: 1;
+}
+.update-card--available {
+  display: block;
+}
+.update-card-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.update-version {
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 600;
+}
+.update-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.update-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.update-notice.ok {
+  border-color: rgba(78, 205, 196, 0.35);
+  color: var(--accent);
+}
+.update-notice.error {
+  border-color: rgba(247, 129, 102, 0.45);
+  color: var(--danger);
+}
+.update-notes {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.update-download-progress {
+  margin-top: 16px;
+  color: var(--accent);
+  font-size: 12px;
 }
 
 .toast {
