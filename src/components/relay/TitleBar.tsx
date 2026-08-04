@@ -2,7 +2,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MouseEvent } from "react";
 import { IconClose, IconMax, IconMin } from "./icons";
 
-export function TitleBar() {
+export function TitleBar({
+  updateVersion,
+  onOpenUpdate,
+}: {
+  updateVersion?: string;
+  onOpenUpdate: () => void;
+}) {
   const win = getCurrentWindow();
 
   const onDragMouseDown = (e: MouseEvent<HTMLDivElement>) => {
@@ -23,6 +29,11 @@ export function TitleBar() {
         </div>
       </div>
       <div className="win-controls">
+        {updateVersion ? (
+          <button type="button" className="titlebar-update" onClick={onOpenUpdate}>
+            发现新版本 v{updateVersion}
+          </button>
+        ) : null}
         <button type="button" className="win-btn" aria-label="最小化" onClick={() => void win.minimize()}>
           <IconMin />
         </button>

@@ -176,6 +176,18 @@ export interface MigrationResult {
   filesChanged: number;
 }
 
+export interface AvailableUpdate {
+  version: string;
+  currentVersion: string;
+  notes?: string;
+  date?: string;
+}
+
+export interface UpdateCheckState {
+  lastCheckedAt?: string;
+  availableUpdate?: AvailableUpdate;
+}
+
 export interface AppErrorPayload {
   code: string;
   message: string;

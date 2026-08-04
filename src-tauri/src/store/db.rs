@@ -7,12 +7,15 @@ use tauri::{AppHandle, Manager};
 use super::crypto::{decrypt_secret, encrypt_secret};
 use super::models::{
     default_svn_mappings, EditorRecord, MigrationRecord, RepoInput, RepoPairMappingInput,
-    RepoPairMappingRecord, RepoPairMappingView, RepoRecord, RepoType, RepoView, EDITOR_PRESETS,
+    RepoPairMappingRecord, RepoPairMappingView, RepoRecord, RepoType, RepoView, UpdateCheckState,
+    EDITOR_PRESETS,
 };
 use crate::error::{AppError, Result};
 use crate::mapper::PathMapping;
 
 pub struct DbState(pub Mutex<Connection>);
+
+const UPDATE_CHECK_STATE_KEY: &str = "update_check_state";
 
 fn db_err(e: rusqlite::Error) -> AppError {
     AppError::Other(anyhow::anyhow!("db: {e}"))
@@ -457,6 +460,30 @@ pub fn save_migration(conn: &Connection, record: MigrationRecord) -> Result<Migr
     Ok(record)
 }
 
+pub fn get_update_check_state(conn: &Connection) -> Result<UpdateCheckState> {
+    match conn.query_row(
+        "SELECT value FROM app_state WHERE key = ?1",
+        params![UPDATE_CHECK_STATE_KEY],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(json) => serde_json::from_str(&json).map_err(|e| AppError::Other(anyhow::anyhow!("{e}"))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(UpdateCheckState::default()),
+        Err(e) => Err(db_err(e)),
+    }
+}
+
+pub fn save_update_check_state(conn: &Connection, state: UpdateCheckState) -> Result<UpdateCheckState> {
+    let json = serde_json::to_string(&state)
+        .map_err(|e| AppError::Other(anyhow::anyhow!("{e}")))?;
+    conn.execute(
+        "INSERT INTO app_state (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![UPDATE_CHECK_STATE_KEY, json],
+    )
+    .map_err(db_err)?;
+    Ok(state)
+}
+
 pub fn repo_path_mappings(repo: &RepoRecord) -> Vec<PathMapping> {
     if repo.path_mappings.is_empty() {
         match repo.repo_type {
@@ -515,4 +542,32 @@ pub fn save_repo_pair_mapping(
         path_mappings: record.path_mappings,
         custom_mapping: record.custom_mapping,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_check_state_round_trips_through_app_state() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        let state = UpdateCheckState {
+            last_checked_at: Some("2026-08-04T00:00:00Z".into()),
+            available_version: Some("0.3.1".into()),
+            available_notes: Some("修复迁移预览问题".into()),
+            available_date: None,
+        };
+
+        assert_eq!(save_update_check_state(&conn, state.clone()).unwrap(), state);
+        assert_eq!(get_update_check_state(&conn).unwrap(), state);
+    }
+
+    #[test]
+    fn update_check_state_defaults_when_not_saved() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        assert_eq!(get_update_check_state(&conn).unwrap(), UpdateCheckState::default());
+    }
 }

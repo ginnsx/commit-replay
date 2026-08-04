@@ -3,9 +3,10 @@ use tauri::State;
 use crate::error::AppError;
 use crate::store::db::{
     delete_editor, delete_repo, get_default_editor_id, get_migration, list_editors, list_migrations,
-    list_repos, save_editor, save_migration, save_repo, set_default_editor, DbState,
+    list_repos, get_update_check_state, save_editor, save_migration, save_repo,
+    save_update_check_state, set_default_editor, DbState,
 };
-use crate::store::models::{EditorRecord, MigrationRecord, RepoInput, RepoView};
+use crate::store::models::{EditorRecord, MigrationRecord, RepoInput, RepoView, UpdateCheckState};
 
 #[tauri::command]
 pub fn relay_list_repos(state: State<DbState>) -> Result<Vec<RepoView>, AppError> {
@@ -77,6 +78,21 @@ pub fn relay_save_migration_record(
 ) -> Result<MigrationRecord, AppError> {
     let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
     save_migration(&conn, record)
+}
+
+#[tauri::command]
+pub fn relay_get_update_check_state(state: State<DbState>) -> Result<UpdateCheckState, AppError> {
+    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    get_update_check_state(&conn)
+}
+
+#[tauri::command]
+pub fn relay_save_update_check_state(
+    state: State<DbState>,
+    update_state: UpdateCheckState,
+) -> Result<UpdateCheckState, AppError> {
+    let conn = state.0.lock().map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    save_update_check_state(&conn, update_state)
 }
 
 #[tauri::command]

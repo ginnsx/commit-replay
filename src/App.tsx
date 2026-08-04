@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AppErrorPayload,
+  AvailableUpdate,
   Editor,
   IntegrationItemView,
   IntegrationPlanResult,
@@ -20,6 +21,7 @@ import {
   deleteRepo,
   executeMigration,
   getDefaultEditorId,
+  getUpdateCheckState,
   getRepoPairMappings,
   listEditors,
   listMigrations,
@@ -30,6 +32,7 @@ import {
   saveEditor,
   saveRepoPairMappings,
   saveRepo,
+  saveUpdateCheckState,
   setDefaultEditor,
   validateMigrationCombo,
 } from "./lib/invoke";
@@ -46,6 +49,7 @@ import { ConflictWorkspace } from "./components/relay/ConflictWorkspace";
 import { PathMappingPanel } from "./components/relay/PathMappingPanel";
 import { VcsBadge } from "./components/relay/Badges";
 import { EditorSettings, RepoManagement } from "./components/settings/SettingsPanels";
+import { UpdateSettings } from "./components/settings/UpdateSettings";
 import { MigrationDetail, MigrationHistory } from "./components/settings/MigrationHistory";
 import {
   IconArrow,
@@ -54,6 +58,16 @@ import {
   IconSuccess,
 } from "./components/relay/icons";
 import type { CommitListItem } from "./lib/types";
+import {
+  checkForUpdate,
+  getAppVersion,
+  installUpdate,
+  isUpdateSupported,
+  shouldAutoCheck,
+  type DownloadProgress,
+  type PendingUpdate,
+  type UpdateStatus,
+} from "./lib/update";
 
 type ModalState =
   | { mode: "add" }
@@ -69,7 +83,9 @@ export default function App() {
 
   const [step, setStep] = useState<WizardStep>("source");
   const [showRepos, setShowRepos] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"repos" | "editors" | "history">("repos");
+  const [settingsTab, setSettingsTab] = useState<"repos" | "editors" | "history" | "updates">(
+    "repos",
+  );
   const [historyDetailId, setHistoryDetailId] = useState<string | null>(null);
 
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -100,6 +116,17 @@ export default function App() {
   const [migrated, setMigrated] = useState(false);
   const [lastMigrationId, setLastMigrationId] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
+
+  const updateSupported = isUpdateSupported();
+  const [appVersion, setAppVersion] = useState("—");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(() =>
+    updateSupported ? "idle" : "unsupported",
+  );
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState<string>();
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate>();
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
+  const [updateError, setUpdateError] = useState<string>();
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>();
 
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<ReactNode>(null);
@@ -169,6 +196,64 @@ export default function App() {
     setMigrations(await listMigrations());
   }, []);
 
+  const runUpdateCheck = useCallback(
+    async (manual: boolean) => {
+      if (!updateSupported) {
+        setUpdateStatus("unsupported");
+        return;
+      }
+      setUpdateStatus("checking");
+      setUpdateError(undefined);
+      try {
+        const pending = await checkForUpdate();
+        const saved = await saveUpdateCheckState({
+          lastCheckedAt: new Date().toISOString(),
+          availableUpdate: pending?.info,
+        });
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        setPendingUpdate(pending);
+        setUpdateStatus(pending ? "available" : "latest");
+      } catch (e) {
+        setUpdateStatus(manual ? "failed" : "idle");
+        if (manual) setUpdateError((e as AppErrorPayload).message);
+      }
+    },
+    [updateSupported],
+  );
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (migrating || !updateSupported) return;
+    setUpdateError(undefined);
+    try {
+      let nextPending = pendingUpdate;
+      if (!nextPending) {
+        setUpdateStatus("checking");
+        nextPending = await checkForUpdate();
+        if (!nextPending) {
+          const saved = await saveUpdateCheckState({ lastCheckedAt: new Date().toISOString() });
+          setLastUpdateCheckAt(saved.lastCheckedAt);
+          setAvailableUpdate(undefined);
+          setUpdateStatus("latest");
+          return;
+        }
+        const saved = await saveUpdateCheckState({
+          lastCheckedAt: new Date().toISOString(),
+          availableUpdate: nextPending.info,
+        });
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        setPendingUpdate(nextPending);
+      }
+      setDownloadProgress(undefined);
+      setUpdateStatus("downloading");
+      await installUpdate(nextPending, setDownloadProgress);
+    } catch (e) {
+      setUpdateStatus("failed");
+      setUpdateError((e as AppErrorPayload).message);
+    }
+  }, [migrating, pendingUpdate, updateSupported]);
+
   const loadRelayedCommits = useCallback(async () => {
     if (!sourceId) {
       setRelayedCommits(new Set());
@@ -183,6 +268,33 @@ export default function App() {
     refreshEditors().catch(() => undefined);
     refreshMigrations().catch(() => undefined);
   }, [refreshRepos, refreshEditors, refreshMigrations]);
+
+  useEffect(() => {
+    getAppVersion()
+      .then(setAppVersion)
+      .catch(() => undefined);
+    if (!updateSupported) return;
+    let cancelled = false;
+    const loadUpdateState = async () => {
+      try {
+        const saved = await getUpdateCheckState();
+        if (cancelled) return;
+        setLastUpdateCheckAt(saved.lastCheckedAt);
+        setAvailableUpdate(saved.availableUpdate);
+        if (shouldAutoCheck(saved.lastCheckedAt)) {
+          await runUpdateCheck(false);
+        } else if (saved.availableUpdate) {
+          setUpdateStatus("available");
+        }
+      } catch {
+        // 自动检查失败不应影响迁移工作流。
+      }
+    };
+    void loadUpdateState();
+    return () => {
+      cancelled = true;
+    };
+  }, [runUpdateCheck, updateSupported]);
 
   const loadCommits = useCallback(
     async (reset = false) => {
@@ -546,6 +658,7 @@ export default function App() {
     if (showRepos) {
       if (settingsTab === "repos") return `${repos.length} 个已保存仓库`;
       if (settingsTab === "editors") return `默认编辑器：${selectedEditor?.name ?? "未选择"}`;
+      if (settingsTab === "updates") return `当前版本 v${appVersion}`;
       if (historyDetailId) return "迁移记录明细";
       return `${migrations.length} 条迁移记录`;
     }
@@ -573,7 +686,7 @@ export default function App() {
       </div>
       <div className="main-content main-content--scroll">
         <div className="settings-tabs">
-          {(["repos", "editors", "history"] as const).map((tab) => (
+          {(["repos", "editors", "history", "updates"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -583,7 +696,7 @@ export default function App() {
                 setHistoryDetailId(null);
               }}
             >
-              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : "迁移记录"}
+              {tab === "repos" ? "仓库" : tab === "editors" ? "编辑器" : tab === "history" ? "迁移记录" : "关于和更新"}
             </button>
           ))}
         </div>
@@ -604,6 +717,20 @@ export default function App() {
             }}
             onAdd={() => setModal({ mode: "editor" })}
             onRemove={handleRemoveEditor}
+          />
+        ) : settingsTab === "updates" ? (
+          <UpdateSettings
+            appVersion={appVersion}
+            status={updateStatus}
+            lastCheckedAt={lastUpdateCheckAt}
+            availableUpdate={availableUpdate}
+            error={updateError}
+            progress={downloadProgress}
+            migrating={migrating}
+            supported={updateSupported}
+            onCheck={() => void runUpdateCheck(true)}
+            onInstall={() => void handleInstallUpdate()}
+            onLater={() => setSettingsTab("repos")}
           />
         ) : historyDetailId ? (
           <MigrationDetail
@@ -901,7 +1028,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar />
+      <TitleBar
+        updateVersion={availableUpdate?.version}
+        onOpenUpdate={() => {
+          setShowRepos(true);
+          setSettingsTab("updates");
+          setHistoryDetailId(null);
+        }}
+      />
       <div className="body">
         <StepRail
           current={showRepos ? null : step}

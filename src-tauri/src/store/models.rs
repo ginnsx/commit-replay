@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::mapper::PathMapping;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateCheckState {
+    pub last_checked_at: Option<String>,
+    pub available_version: Option<String>,
+    pub available_notes: Option<String>,
+    pub available_date: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoType {

@@ -37,7 +37,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            if let Some(public_key) = option_env!("RELAY_UPDATER_PUBLIC_KEY") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().pubkey(public_key).build())?;
+            }
             let conn = init_db(&app.handle())?;
             app.manage(DbState(std::sync::Mutex::new(conn)));
             app.manage(PreviewCache::new());
@@ -56,6 +62,8 @@ pub fn run() {
             relay_list_migrations,
             relay_get_migration,
             relay_save_migration_record,
+            relay_get_update_check_state,
+            relay_save_update_check_state,
             relay_pick_folder,
             relay_probe_svn_wc,
             relay_probe_git_repo,

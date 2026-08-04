@@ -175,6 +175,18 @@ npm test && npm run lint && npm run format:check
 cd src-tauri && cargo test && cargo clippy
 ```
 
+### Windows 自动更新发布
+
+正式发布使用 `vX.Y.Z` 标签触发 GitHub Actions。标签版本必须与 `package.json` 一致；工作流仅构建 Windows x64 的 NSIS 安装包，并发布签名后的更新文件。
+
+首次发布前，生成 Tauri 更新签名密钥，并将私钥内容保存为仓库保密配置 `TAURI_SIGNING_PRIVATE_KEY`（密码如有则保存为 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）。将对应公钥内容保存为仓库变量 `TAURI_SIGNING_PUBLIC_KEY`。私钥不得提交到仓库或写入配置文件。
+
+```powershell
+npm run tauri signer generate -- -w "$HOME/.tauri/relay.key"
+```
+
+现有 `0.2.0` 安装包不具备更新能力；用户需要手动安装一次 `0.3.0`，之后才可使用应用内更新。
+
 测试分层、自动回归、SVN 集成测试与验收测试说明见 [TESTING.md](TESTING.md)。
 
 ---
