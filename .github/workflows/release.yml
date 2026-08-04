@@ -13,10 +13,6 @@ jobs:
     name: 构建并发布 Windows 安装包
     runs-on: windows-latest
     environment: release
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +29,9 @@ jobs:
 
       - name: 校验版本和签名配置
         shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           $packageVersion = node -p "require('./package.json').version"
           $tagVersion = "${{ github.ref_name }}".TrimStart('v')
@@ -48,7 +47,10 @@ jobs:
 
       - name: 安装 SVN 回归依赖
         shell: pwsh
-        run: choco install subversion --no-progress --yes
+        run: |
+          choco install sliksvn --no-progress --yes
+          svn --version --quiet
+          svnadmin --version --quiet
 
       - name: 前端检查
         run: |
