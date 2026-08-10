@@ -61,7 +61,12 @@ export function RepoManagement({
                 <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{repo.lastUsed ?? "—"}</td>
                 <td>
                   <div className="actions">
-                    <button type="button" className="icon-btn" title="编辑" onClick={() => onEdit(repo)}>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      title="编辑"
+                      onClick={() => onEdit(repo)}
+                    >
                       <IconEdit />
                     </button>
                     <button
@@ -98,7 +103,9 @@ export function EditorSettings({
 }) {
   return (
     <div className="editor-settings">
-      <p className="editor-settings-intro">选择默认外部编辑器，用于在冲突解决时打开目标仓库中的文件。</p>
+      <p className="editor-settings-intro">
+        选择默认外部编辑器，用于在冲突解决时打开目标仓库中的文件。
+      </p>
       <div className="editor-option-list">
         {editors.map((e) => (
           <button

@@ -156,7 +156,12 @@ export function RepoModal({ repo, onClose, onSave }: Props) {
                 onChange={(e) => set("path", e.target.value)}
                 placeholder="D:\Projects\my-repo"
               />
-              <button type="button" className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={browse}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ flexShrink: 0 }}
+                onClick={browse}
+              >
                 <IconFolder /> 浏览
               </button>
             </div>
@@ -164,10 +169,7 @@ export function RepoModal({ repo, onClose, onSave }: Props) {
           </div>
           <div className="form-group">
             <label>版本控制</label>
-            <select
-              value={form.type}
-              onChange={(e) => set("type", e.target.value as VcsKind)}
-            >
+            <select value={form.type} onChange={(e) => set("type", e.target.value as VcsKind)}>
               <option value="git">Git</option>
               <option value="svn">SVN</option>
             </select>
@@ -194,7 +196,9 @@ export function RepoModal({ repo, onClose, onSave }: Props) {
               {!gitProbing && gitProbeError && form.path.trim() && (
                 <div className="svn-wc-card warn">
                   <div className="svn-wc-card-title">未能识别 Git 仓库</div>
-                  <p className="form-hint" style={{ margin: 0 }}>{gitProbeError}</p>
+                  <p className="form-hint" style={{ margin: 0 }}>
+                    {gitProbeError}
+                  </p>
                 </div>
               )}
               {gitBranchOptions.length > 0 && (
@@ -235,14 +239,19 @@ export function RepoModal({ repo, onClose, onSave }: Props) {
               {!svnProbing && svnProbeError && form.path.trim() && (
                 <div className="svn-wc-card warn">
                   <div className="svn-wc-card-title">未能识别 SVN 工作副本</div>
-                  <p className="form-hint" style={{ margin: 0 }}>{svnProbeError}</p>
+                  <p className="form-hint" style={{ margin: 0 }}>
+                    {svnProbeError}
+                  </p>
                 </div>
               )}
 
               <div className="form-row">
                 <div className="form-group">
                   <label>SVN 用户名</label>
-                  <input value={form.svnUser ?? ""} onChange={(e) => set("svnUser", e.target.value)} />
+                  <input
+                    value={form.svnUser ?? ""}
+                    onChange={(e) => set("svnUser", e.target.value)}
+                  />
                 </div>
                 <div className="form-group">
                   <label>密码</label>

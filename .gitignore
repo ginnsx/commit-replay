@@ -30,3 +30,6 @@ src-tauri/gen
 # Test coverage
 coverage
 artifacts/
+
+# 本地异常记录，不纳入版本管理
+差异记录.txt

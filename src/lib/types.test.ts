@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import type { FileChange, PreviewResult, ReplayUnitMeta, UnitStatusEvent } from "./types";
+import type {
+  FileChange,
+  IntegrationItemView,
+  PreviewResult,
+  ReplayUnitMeta,
+  UnitStatusEvent,
+} from "./types";
 
 describe("TypeScript model types", () => {
   it("ReplayUnitMeta has required fields", () => {
@@ -53,5 +59,28 @@ describe("TypeScript model types", () => {
       message: null,
     };
     expect(event.status).toBe("committed");
+  });
+
+  it("IntegrationItemView accepts optional change analysis fields", () => {
+    const item: IntegrationItemView = {
+      id: "src/a.txt",
+      path: "src/a.txt",
+      status: "mod",
+      integrationStatus: "review",
+      strategy: "write_after",
+      reason: "上下文漂移但可生成预览",
+      overlapLines: [1, 3],
+      locationStatus: "context_drift",
+      mergeStatus: "auto_merge",
+      matchMethod: "context",
+      confidence: 0.75,
+      candidateCount: 1,
+      before: ["alpha", "old", "omega"],
+      after: ["alpha", "new", "omega"],
+      diff: [],
+    };
+
+    expect(item.locationStatus).toBe("context_drift");
+    expect(item.mergeStatus).toBe("auto_merge");
   });
 });

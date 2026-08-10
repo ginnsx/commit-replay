@@ -8,8 +8,9 @@ use crate::{
 
     preview::{
 
-        build_integration_plan, build_preview_plan_meta, build_preview_plan_parallel, enrich_file,
-        get_merged_file_change, preview_cache_key, MappingInput, PreviewCache, PreviewContext,
+        build_integration_plan, build_preview_plan_meta, build_preview_plan_parallel,
+        build_source_preview_plan_meta, enrich_file, get_merged_file_change, preview_cache_key,
+        MappingInput, PreviewCache, PreviewContext,
 
         TargetWcKind,
 
@@ -121,6 +122,20 @@ fn preview_context(
 
 }
 
+fn source_reader_context(
+    state: &DbState,
+    source_id: &str,
+) -> Result<crate::vcs::SourceReader, AppError> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::Other(anyhow::anyhow!("db lock")))?;
+    let source = get_repo(&conn, source_id)?
+        .ok_or_else(|| AppError::Vcs("source repo not found".into()))?;
+    let password = decrypt_repo_pass(&source)?;
+    crate::vcs::SourceReader::from_repo(&source, password).map_err(Into::into)
+}
+
 
 
 fn target_kind_for_context(ctx: &PreviewContext) -> TargetWcKind {
@@ -203,6 +218,20 @@ pub async fn build_preview_meta(
         .map_err(|e| AppError::Other(anyhow::anyhow!("preview meta task: {e}")))??;
 
     cache.set(key, aggregated.clone());
+    Ok(meta_from_aggregated(aggregated))
+}
+
+#[tauri::command]
+pub async fn build_source_preview_meta(
+    state: State<'_, DbState>,
+    source_id: String,
+    source_refs: Vec<String>,
+) -> Result<PreviewMetaResult, AppError> {
+    let reader = source_reader_context(&state, &source_id)?;
+    let aggregated =
+        tokio::task::spawn_blocking(move || build_source_preview_plan_meta(&reader, &source_refs))
+            .await
+            .map_err(|e| AppError::Other(anyhow::anyhow!("source preview task: {e}")))??;
     Ok(meta_from_aggregated(aggregated))
 }
 

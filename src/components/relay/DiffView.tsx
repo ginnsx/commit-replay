@@ -5,11 +5,7 @@ import { StatusBadge } from "./Badges";
 
 const DIFF_LINE_HEIGHT = 20;
 
-export function DiffView({
-  file,
-}: {
-  file?: FileChangeView | null;
-}) {
+export function DiffView({ file }: { file?: FileChangeView | null }) {
   const parentRef = useRef<HTMLDivElement>(null);
   const lines = file?.diff ?? [];
 

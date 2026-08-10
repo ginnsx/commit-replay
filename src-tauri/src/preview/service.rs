@@ -3,6 +3,7 @@ use crate::{
     error::{AppError, Result},
     mapper::{Mapper, PathMapping},
     model::{ConflictRisk, DiffStats, FileChange, FileChangeKind, PreviewResult, PreviewUnit},
+    preview::change_analysis::analyze_file_change,
     preview::git_wc::{read_wc_file, resolve_wc_path},
     preview::patch_apply::{
         apply_unified_patch, merge_patches_last_wins, reconstruct_new_from_patch,
@@ -270,6 +271,41 @@ pub fn build_preview_plan_meta(
     aggregate_merged_by_target_path(&units, &ctx.target_wc_path, &ordered_refs, &ctx.reader)
 }
 
+pub fn load_source_preview_units(
+    reader: &SourceReader,
+    source_refs: &[String],
+) -> Result<Vec<PreviewUnit>> {
+    use rayon::prelude::*;
+
+    if source_refs.is_empty() {
+        return Err(AppError::Vcs("no source revisions selected".into()));
+    }
+
+    let reader = reader.clone();
+    let mut units: Vec<PreviewUnit> = source_refs
+        .par_iter()
+        .map(|source_ref| {
+            let changeset = reader.load_changeset_meta(source_ref)?;
+            Ok(PreviewUnit {
+                meta: changeset.meta,
+                files: changeset.files,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    sort_units_chronological(&mut units);
+    Ok(units)
+}
+
+pub fn build_source_preview_plan_meta(
+    reader: &SourceReader,
+    source_refs: &[String],
+) -> Result<Vec<FileChange>> {
+    let units = load_source_preview_units(reader, source_refs)?;
+    let ordered_refs = chronological_source_refs(&units);
+    aggregate_merged_by_source_path(&units, &ordered_refs)
+}
+
 pub fn get_merged_file_change(
     ctx: &PreviewContext,
     source_refs: &[String],
@@ -365,6 +401,19 @@ fn collect_changes_by_path(
     by_path
 }
 
+fn collect_source_changes_by_path(
+    units: &[PreviewUnit],
+) -> std::collections::BTreeMap<String, Vec<FileChange>> {
+    let mut by_path: std::collections::BTreeMap<String, Vec<FileChange>> =
+        std::collections::BTreeMap::new();
+    for unit in units {
+        for f in &unit.files {
+            by_path.entry(f.path.clone()).or_default().push(f.clone());
+        }
+    }
+    by_path
+}
+
 fn aggregate_merged_by_target_path(
     units: &[PreviewUnit],
     wc_root: &str,
@@ -386,6 +435,18 @@ fn aggregate_merged_by_target_path(
         .collect()
 }
 
+fn aggregate_merged_by_source_path(
+    units: &[PreviewUnit],
+    source_refs: &[String],
+) -> Result<Vec<FileChange>> {
+    collect_source_changes_by_path(units)
+        .into_iter()
+        .filter_map(|(path, changes)| {
+            merge_file_changes_for_source_preview(&path, &changes, source_refs).transpose()
+        })
+        .collect()
+}
+
 fn change_chrono_key(fc: &FileChange, source_refs: &[String]) -> u64 {
     let Some(sr) = fc.source_ref.as_deref() else {
         return 0;
@@ -398,6 +459,88 @@ fn change_chrono_key(fc: &FileChange, source_refs: &[String]) -> u64 {
 
 fn sort_changes_chronological(changes: &mut [FileChange], source_refs: &[String]) {
     changes.sort_by_key(|c| change_chrono_key(c, source_refs));
+}
+
+fn source_before_content(fc: &FileChange) -> Option<String> {
+    if let Some(before) = fc.before.clone() {
+        return Some(before);
+    }
+    let patch = fc.patch.as_deref()?;
+    match fc.kind {
+        FileChangeKind::Add => None,
+        FileChangeKind::Binary => None,
+        _ => Some(reconstruct_old_from_patch(patch)),
+    }
+}
+
+fn source_after_content(fc: &FileChange, current: Option<&str>) -> Option<String> {
+    if matches!(fc.kind, FileChangeKind::Delete) {
+        return None;
+    }
+    if let Some(after) = fc.after.clone().or_else(|| fc.source_after.clone()) {
+        return Some(after);
+    }
+    let patch = fc.patch.as_deref()?;
+    if let Some(base) = current {
+        return Some(
+            apply_unified_patch(Some(base), patch)
+                .unwrap_or_else(|_| reconstruct_new_from_patch(patch)),
+        );
+    }
+    Some(reconstruct_new_from_patch(patch))
+}
+
+fn merge_file_changes_for_source_preview(
+    path: &str,
+    changes: &[FileChange],
+    source_refs: &[String],
+) -> Result<Option<FileChange>> {
+    if changes.is_empty() {
+        return Ok(None);
+    }
+
+    let mut ordered = changes.to_vec();
+    sort_changes_chronological(&mut ordered, source_refs);
+    let first = &ordered[0];
+    let before = source_before_content(first);
+    let mut after = before.clone();
+
+    for fc in &ordered {
+        after = source_after_content(fc, after.as_deref());
+    }
+
+    let latest = ordered.last().expect("non-empty");
+    let kind = if latest.kind == FileChangeKind::Binary {
+        FileChangeKind::Binary
+    } else {
+        infer_net_kind(before.is_some(), after.is_some())
+    };
+
+    if kind != FileChangeKind::Binary
+        && !has_net_change(&kind, before.as_deref(), after.as_deref())
+    {
+        return Ok(None);
+    }
+
+    let patch = if ordered.len() == 1 {
+        latest.patch.clone()
+    } else {
+        None
+    };
+
+    Ok(Some(FileChange {
+        path: path.to_string(),
+        target_path: Some(path.to_string()),
+        kind,
+        old_path: first.old_path.clone(),
+        before,
+        after,
+        source_after: latest.source_after.clone(),
+        source_ref: None,
+        patch,
+        conflict_risk: latest.conflict_risk.clone(),
+        analysis: None,
+    }))
 }
 
 fn apply_merge_step(disk: Option<String>, patch: &str) -> Result<Option<String>> {
@@ -458,6 +601,7 @@ fn merge_file_changes_for_preview(
             source_ref: None,
             patch: display_patch,
             conflict_risk: Some(ConflictRisk::High),
+            analysis: None,
         }));
     }
 
@@ -476,6 +620,7 @@ fn merge_file_changes_for_preview(
             source_ref: None,
             patch: None,
             conflict_risk: Some(ConflictRisk::Low),
+            analysis: None,
         }));
     }
 
@@ -556,18 +701,35 @@ fn merge_file_changes_for_preview(
     }
 
     let first = &ordered[0];
-    Ok(Some(FileChange {
+    let mut merged = FileChange {
         path: first.path.clone(),
         target_path: Some(target_path.to_string()),
         kind,
         old_path: first.old_path.clone(),
-        before: wc_before,
+        before: wc_before.clone(),
         after: after_content,
         source_after: latest.source_after.clone(),
         source_ref: None,
-        patch: display_patch,
+        patch: display_patch.clone(),
         conflict_risk: Some(conflict_risk),
-    }))
+        analysis: None,
+    };
+
+    let analysis_patch = display_patch.or_else(|| {
+        if ordered.len() == 1 {
+            latest.patch.clone()
+        } else {
+            None
+        }
+    });
+    if let Some(patch) = analysis_patch {
+        let mut analysis_input = merged.clone();
+        analysis_input.patch = Some(patch);
+        analysis_input.before = wc_before;
+        merged.analysis = analyze_file_change(&analysis_input);
+    }
+
+    Ok(Some(merged))
 }
 
 fn infer_net_kind(before_exists: bool, after_exists: bool) -> FileChangeKind {
@@ -638,7 +800,38 @@ mod tests {
 
     use super::*;
 
-    use crate::model::{FileChange, FileChangeKind};
+    use crate::model::{FileChange, FileChangeKind, PreviewUnit, ReplayUnitMeta};
+
+    fn test_meta(source_ref: &str) -> ReplayUnitMeta {
+        ReplayUnitMeta {
+            source_ref: source_ref.into(),
+            author: "tester".into(),
+            date: "2026-06-29T00:00:00Z".into(),
+            message: "test".into(),
+            changed_paths_count: 1,
+        }
+    }
+
+    fn test_change(
+        path: &str,
+        kind: FileChangeKind,
+        source_ref: &str,
+        patch: Option<String>,
+    ) -> FileChange {
+        FileChange {
+            path: path.into(),
+            target_path: None,
+            kind,
+            old_path: None,
+            before: None,
+            after: None,
+            source_after: None,
+            source_ref: Some(source_ref.into()),
+            patch,
+            conflict_risk: None,
+            analysis: None,
+        }
+    }
 
     #[test]
     fn apply_merge_step_does_not_replace_full_file_with_patch_fragment() {
@@ -672,6 +865,7 @@ mod tests {
                 source_ref: Some("svn:50545".into()),
                 patch: Some(add_rows.into()),
                 conflict_risk: None,
+                analysis: None,
             },
             FileChange {
                 path: "/trunk/a.html".into(),
@@ -684,6 +878,7 @@ mod tests {
                 source_ref: Some("svn:50556".into()),
                 patch: Some(remove_style.into()),
                 conflict_risk: None,
+                analysis: None,
             },
         ];
         let source_refs = vec!["svn:50557".into(), "svn:50556".into(), "svn:50545".into()];
@@ -745,6 +940,7 @@ mod tests {
             source_ref: Some("svn:50556".into()),
             patch: Some(patch),
             conflict_risk: None,
+            analysis: None,
         }];
         let wc_root =
             std::env::temp_dir().join(format!("copy-diff-ctx-fail-test-{}", std::process::id()));
@@ -770,5 +966,111 @@ mod tests {
         assert!(diff.iter().any(|l| l.text.contains("rows=\"5\"")));
         assert!(diff.len() <= 4);
         let _ = std::fs::remove_dir_all(&wc_root);
+    }
+
+    #[test]
+    fn source_preview_aggregates_single_commit_file_kinds() {
+        let units = vec![PreviewUnit {
+            meta: test_meta("git:1"),
+            files: vec![
+                test_change(
+                    "added.txt",
+                    FileChangeKind::Add,
+                    "git:1",
+                    Some("@@ -0,0 +1,1 @@\n+new\n".into()),
+                ),
+                test_change(
+                    "changed.txt",
+                    FileChangeKind::Modify,
+                    "git:1",
+                    Some("@@ -1,1 +1,1 @@\n-old\n+new\n".into()),
+                ),
+                test_change(
+                    "deleted.txt",
+                    FileChangeKind::Delete,
+                    "git:1",
+                    Some("@@ -1,1 +0,0 @@\n-old\n".into()),
+                ),
+            ],
+        }];
+
+        let files = aggregate_merged_by_source_path(&units, &["git:1".into()]).unwrap();
+
+        assert_eq!(files.len(), 3);
+        assert!(files
+            .iter()
+            .any(|f| f.path == "added.txt" && f.kind == FileChangeKind::Add));
+        assert!(files
+            .iter()
+            .any(|f| f.path == "changed.txt" && f.kind == FileChangeKind::Modify));
+        assert!(files
+            .iter()
+            .any(|f| f.path == "deleted.txt" && f.kind == FileChangeKind::Delete));
+    }
+
+    #[test]
+    fn source_preview_multi_commit_same_file_shows_final_net_change() {
+        let changes = vec![
+            test_change(
+                "chain.txt",
+                FileChangeKind::Modify,
+                "git:1",
+                Some("@@ -1,1 +1,1 @@\n-base\n+step1\n".into()),
+            ),
+            test_change(
+                "chain.txt",
+                FileChangeKind::Modify,
+                "git:2",
+                Some("@@ -1,1 +1,1 @@\n-step1\n+after\n".into()),
+            ),
+        ];
+
+        let merged =
+            merge_file_changes_for_source_preview("chain.txt", &changes, &["git:1".into(), "git:2".into()])
+                .unwrap()
+                .expect("net change");
+
+        assert_eq!(merged.kind, FileChangeKind::Modify);
+        assert_eq!(merged.before.as_deref(), Some("base"));
+        assert_eq!(merged.after.as_deref(), Some("after"));
+        assert_eq!(merged.patch, None);
+    }
+
+    #[test]
+    fn source_preview_add_then_delete_cancels_out() {
+        let changes = vec![
+            test_change(
+                "tmp.txt",
+                FileChangeKind::Add,
+                "git:1",
+                Some("@@ -0,0 +1,1 @@\n+temp\n".into()),
+            ),
+            test_change(
+                "tmp.txt",
+                FileChangeKind::Delete,
+                "git:2",
+                Some("@@ -1,1 +0,0 @@\n-temp\n".into()),
+            ),
+        ];
+
+        let merged =
+            merge_file_changes_for_source_preview("tmp.txt", &changes, &["git:1".into(), "git:2".into()])
+                .unwrap();
+
+        assert!(merged.is_none());
+    }
+
+    #[test]
+    fn source_preview_binary_change_stays_file_level() {
+        let changes = vec![test_change("image.bin", FileChangeKind::Binary, "git:1", None)];
+
+        let merged =
+            merge_file_changes_for_source_preview("image.bin", &changes, &["git:1".into()])
+                .unwrap()
+                .expect("binary change");
+        let view = crate::relay::preview_file_with_diff(&merged);
+
+        assert_eq!(merged.kind, FileChangeKind::Binary);
+        assert!(view.diff.unwrap().is_empty());
     }
 }

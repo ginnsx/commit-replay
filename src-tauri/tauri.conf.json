@@ -26,7 +26,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,6 +37,15 @@
     ]
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU3NDUwNDU2Qzk2MEM3QUIKUldTcngyREpWZ1JGVjlkY0t1VFZTNmp5Mjh0TjlrUGJCcDFLSWxucFMyZGNQcXhVT1pRU3pZc08K",
+      "endpoints": [
+        "https://github.com/ginnsx/commit-replay/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    },
     "shell": {
       "open": true,
       "scope": [

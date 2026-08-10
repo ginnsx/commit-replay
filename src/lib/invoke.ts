@@ -16,6 +16,7 @@ import type {
   RepoPairMapping,
   GitRepoInfo,
   SvnWcInfo,
+  UpdateCheckState,
 } from "./types";
 
 function parseError(e: unknown): AppErrorPayload {
@@ -101,6 +102,23 @@ export async function getMigration(id: string): Promise<MigrationRecord | null> 
   return row ? normalizeMigration(row) : null;
 }
 
+export async function getUpdateCheckState(): Promise<UpdateCheckState> {
+  const row = await invoke<Record<string, unknown>>("relay_get_update_check_state");
+  return normalizeUpdateCheckState(row);
+}
+
+export async function saveUpdateCheckState(state: UpdateCheckState): Promise<UpdateCheckState> {
+  const row = await invoke<Record<string, unknown>>("relay_save_update_check_state", {
+    updateState: {
+      last_checked_at: state.lastCheckedAt ?? null,
+      available_version: state.availableUpdate?.version ?? null,
+      available_notes: state.availableUpdate?.notes ?? null,
+      available_date: state.availableUpdate?.date ?? null,
+    },
+  });
+  return normalizeUpdateCheckState(row);
+}
+
 export async function pickFolder(): Promise<string | null> {
   return invoke<string | null>("relay_pick_folder");
 }
@@ -144,10 +162,11 @@ export async function listRepoCommits(
   }));
 }
 
-export async function validateMigrationCombo(
-  sourceId: string,
-  targetId: string,
-): Promise<boolean> {
+export async function listRelayedCommits(sourceId: string): Promise<string[]> {
+  return invoke<string[]>("list_relayed_commits_cmd", { sourceId });
+}
+
+export async function validateMigrationCombo(sourceId: string, targetId: string): Promise<boolean> {
   return invoke("validate_migration_combo", { sourceId, targetId });
 }
 
@@ -201,6 +220,24 @@ export async function buildPreviewMeta(
     targetId,
     sourceRefs,
     pathMappings: mappingArgs(pathMappings),
+  });
+  return {
+    files: (r.files as FileChangeView[]) ?? [],
+    adds: Number(r.adds),
+    mods: Number(r.mods),
+    dels: Number(r.dels),
+    totalAdditions: Number(r.total_additions),
+    totalDeletions: Number(r.total_deletions),
+  };
+}
+
+export async function buildSourcePreviewMeta(
+  sourceId: string,
+  sourceRefs: string[],
+): Promise<PreviewMetaResult> {
+  const r = await invoke<Record<string, unknown>>("build_source_preview_meta", {
+    sourceId,
+    sourceRefs,
   });
   return {
     files: (r.files as FileChangeView[]) ?? [],
@@ -324,5 +361,20 @@ function normalizeMigration(r: Record<string, unknown>): MigrationRecord {
     files: (r.files as FileChangeView[]) ?? [],
     conflictsResolved: Number(r.conflicts_resolved ?? r.conflictsResolved ?? 0),
     status: String(r.status),
+  };
+}
+
+function normalizeUpdateCheckState(r: Record<string, unknown>): UpdateCheckState {
+  const version = r.available_version ? String(r.available_version) : undefined;
+  return {
+    lastCheckedAt: r.last_checked_at ? String(r.last_checked_at) : undefined,
+    availableUpdate: version
+      ? {
+          version,
+          currentVersion: "",
+          notes: r.available_notes ? String(r.available_notes) : undefined,
+          date: r.available_date ? String(r.available_date) : undefined,
+        }
+      : undefined,
   };
 }

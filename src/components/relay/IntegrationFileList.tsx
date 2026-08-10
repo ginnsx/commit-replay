@@ -95,8 +95,12 @@ export function IntegrationFileList({
   onSelect: (id: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(() =>
-    Object.fromEntries(SECTIONS.map((s) => [s.key, s.defaultCollapsed])) as Record<SectionKey, boolean>,
+  const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>(
+    () =>
+      Object.fromEntries(SECTIONS.map((s) => [s.key, s.defaultCollapsed])) as Record<
+        SectionKey,
+        boolean
+      >,
   );
 
   const grouped = useMemo(
@@ -134,7 +138,8 @@ export function IntegrationFileList({
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => listRef.current,
-    estimateSize: (index) => (entries[index]?.kind === "header" ? HEADER_HEIGHT : FILE_ROW_ESTIMATE),
+    estimateSize: (index) =>
+      entries[index]?.kind === "header" ? HEADER_HEIGHT : FILE_ROW_ESTIMATE,
     gap: ROW_GAP,
     overscan: 8,
   });
@@ -176,7 +181,9 @@ export function IntegrationFileList({
                       onClick={() => toggleSection(entry.section)}
                       aria-expanded={!entry.collapsed}
                     >
-                      <span className={`integration-section-chevron${entry.collapsed ? "" : " open"}`}>
+                      <span
+                        className={`integration-section-chevron${entry.collapsed ? "" : " open"}`}
+                      >
                         <IconChevronDown />
                       </span>
                       <span className="integration-section-title">{entry.title}</span>

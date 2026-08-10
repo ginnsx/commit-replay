@@ -10,6 +10,7 @@ const ROW_ESTIMATE = 68;
 export function CommitPicker({
   commits,
   selectedIds,
+  relayedIds,
   onToggle,
   onSelectMany,
   hasRemoteMore,
@@ -18,6 +19,7 @@ export function CommitPicker({
 }: {
   commits: CommitListItem[];
   selectedIds: Set<string>;
+  relayedIds?: Set<string>;
   onToggle: (id: string) => void;
   onSelectMany: (ids: string[], select: boolean) => void;
   hasRemoteMore?: boolean;
@@ -126,7 +128,12 @@ export function CommitPicker({
                 : "没有匹配的提交"}
           </p>
           {search && (
-            <button type="button" className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setSearch("")}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={() => setSearch("")}
+            >
               清除搜索
             </button>
           )}
@@ -157,6 +164,7 @@ export function CommitPicker({
                     <CommitRow
                       commit={commit}
                       selected={selectedIds.has(commit.id)}
+                      relayed={relayedIds?.has(commit.id)}
                       onToggle={onToggle}
                     />
                   </div>
@@ -168,6 +176,7 @@ export function CommitPicker({
             <span className="commit-picker-count">
               共 {filtered.length} 条{q ? `（全部 ${commits.length} 条）` : ""}
               {selectedIds.size > 0 ? ` · 已选 ${selectedIds.size} 条` : ""}
+              {relayedIds && relayedIds.size > 0 ? ` · ${relayedIds.size} 条已提交` : ""}
             </span>
             {hasRemoteMore && (
               <button

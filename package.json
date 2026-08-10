@@ -1,7 +1,7 @@
 {
   "name": "copy-diff",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,6 +26,8 @@
     "@tanstack/react-virtual": "^3.13.12",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zustand": "^5.0.13"

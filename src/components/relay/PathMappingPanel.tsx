@@ -68,7 +68,11 @@ export function PathMappingPanel({
         </p>
       )}
       <label className="form-advanced-toggle" style={{ marginTop: 12 }}>
-        <input type="checkbox" checked={customMapping} onChange={(e) => toggleCustom(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={customMapping}
+          onChange={(e) => toggleCustom(e.target.checked)}
+        />
         <span>源与目标目录结构不同，需要自定义对应关系</span>
       </label>
       {customMapping && (

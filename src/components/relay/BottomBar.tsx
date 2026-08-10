@@ -32,7 +32,12 @@ export function BottomBar({
         )}
         {primaryAction ??
           (onNext && (
-            <button type="button" className="btn btn-primary" disabled={nextDisabled} onClick={onNext}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={nextDisabled}
+              onClick={onNext}
+            >
               {nextLabel}
             </button>
           ))}
