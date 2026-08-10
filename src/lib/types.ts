@@ -226,6 +226,7 @@ export interface MigrationResult {
   migrationId: string;
   commitsApplied: number;
   filesChanged: number;
+  createdBranch: string | null;
 }
 
 export interface AvailableUpdate {

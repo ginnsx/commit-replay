@@ -20,7 +20,7 @@ use copy_diff_lib::{
         CommitSnapshot, FileChangeView, IntegrationStatus, IntegrationStrategy, MigrationMode,
         MigrationRecord, RepoRecord, RepoSnapshot, RepoType,
     },
-    vcs::{svn::parse_log_xml, MigrationWriter},
+    vcs::{svn::parse_log_xml, MigrationWriter, VcsCheckpoint},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -169,6 +169,7 @@ struct RepoFixture {
 #[derive(Debug)]
 struct MigrationOutput {
     commits_applied: usize,
+    created_branch: Option<String>,
     record: MigrationRecord,
 }
 
@@ -411,6 +412,7 @@ fn run_case(run_dir: &Path, case: &CaseSpec) -> AppResult<CaseResult> {
                 })
             } else if *target_unchanged {
                 verify_manifest_equal(&before, &after, case.id)
+                    .and_then(|()| verify_failed_git_branch_state(case, &target_path, &baseline))
             } else {
                 Ok(())
             }
@@ -515,137 +517,173 @@ fn relay_migrate(
     let checkpoint = writer
         .prepare(&target.branch)
         .map_err(|e| phase("execute", "unexpected_failure", e))?;
-
-    let mut commits_applied = 0usize;
-    for unit in &preview.units {
-        let unit_strategies = unit
-            .files
-            .iter()
-            .filter_map(|fc| {
-                let target_path = fc.target_path.as_deref()?;
-                let strategy = strategies.get(target_path).copied()?;
-                let status = statuses.get(target_path).copied()?;
-                Some((
-                    target_path.to_string(),
-                    unit_apply_strategy(
-                        target_path,
-                        strategy,
-                        status,
-                        &resolved_blocked,
-                        case.squash_commits,
-                        fc.patch.is_some(),
-                    ),
-                ))
-            })
-            .collect::<HashMap<_, _>>();
-        if !unit_has_applicable_changes(unit, &unit_strategies) {
-            continue;
-        }
-        let apply = writer
-            .apply_changeset_with_strategies(
+    let mut created_branch = None;
+    let execution = (|| -> AppResult<usize> {
+        let mut branch_started = false;
+        let mut commits_applied = 0usize;
+        for unit in &preview.units {
+            let unit_strategies = unit
+                .files
+                .iter()
+                .filter_map(|fc| {
+                    let target_path = fc.target_path.as_deref()?;
+                    let strategy = strategies.get(target_path).copied()?;
+                    let status = statuses.get(target_path).copied()?;
+                    Some((
+                        target_path.to_string(),
+                        unit_apply_strategy(
+                            target_path,
+                            strategy,
+                            status,
+                            &resolved_blocked,
+                            case.squash_commits,
+                            fc.patch.is_some(),
+                        ),
+                    ))
+                })
+                .collect::<HashMap<_, _>>();
+            if !unit_has_applicable_changes(unit, &unit_strategies) {
+                continue;
+            }
+            if !branch_started {
+                created_branch = writer.create_migration_branch()?;
+                branch_started = true;
+            }
+            let apply = writer.apply_changeset_with_strategies(
                 &ChangeSet {
                     meta: unit.meta.clone(),
                     files: unit.files.clone(),
                 },
                 &unit_strategies,
-            )
-            .map_err(|e| phase("execute", "unexpected_failure", e))?;
-        if apply.status != ApplyStatus::Ok {
-            let _ = writer.rollback(&checkpoint);
-            return Err(PhaseError {
-                phase: "execute",
-                error_type: "unexpected_failure",
-                message: format!("apply failed: {:?}", apply.failed_paths),
-            });
-        }
-        if !case.squash_commits {
-            let message = commit_message::replay_message(&unit.meta);
-            if let Err(err) = writer.commit_allow_empty(&unit.meta, &message) {
-                let _ = writer.rollback(&checkpoint);
-                return Err(phase("execute", "unexpected_failure", err));
+            )?;
+            if apply.status != ApplyStatus::Ok {
+                return Err(AppError::Apply(format!(
+                    "apply failed: {:?}",
+                    apply.failed_paths
+                )));
             }
-            commits_applied += 1;
+            if !case.squash_commits {
+                let message = commit_message::replay_message(&unit.meta);
+                writer.commit_allow_empty(&unit.meta, &message)?;
+                commits_applied += 1;
+            }
         }
-    }
 
-    let finalize_files = preview
-        .aggregated
-        .iter()
-        .filter(|fc| {
-            fc.target_path.as_ref().is_some_and(|tp| {
-                strategies.get(tp).is_some_and(|strategy| {
-                    should_finalize_path(
-                        tp,
-                        *strategy,
-                        &resolved_blocked,
-                        case.squash_commits,
-                        case.migration_mode,
-                    )
+        let finalize_files = preview
+            .aggregated
+            .iter()
+            .filter(|fc| {
+                fc.target_path.as_ref().is_some_and(|tp| {
+                    strategies.get(tp).is_some_and(|strategy| {
+                        should_finalize_path(
+                            tp,
+                            *strategy,
+                            &resolved_blocked,
+                            case.squash_commits,
+                            case.migration_mode,
+                        )
+                    })
                 })
             })
-        })
-        .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
-        .collect::<Vec<_>>();
-    if !finalize_files.is_empty() {
-        let finalize_strategies = finalize_files
-            .iter()
-            .filter_map(|fc| {
-                let target_path = fc.target_path.as_deref()?;
-                Some((target_path.to_string(), IntegrationStrategy::WriteAfter))
-            })
-            .collect::<HashMap<_, _>>();
-        let finalize_meta = preview
-            .units
-            .last()
-            .map(|u| u.meta.clone())
-            .unwrap_or_else(|| preview.units[0].meta.clone());
-        let apply = writer
-            .apply_changeset_with_strategies(
+            .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
+            .collect::<Vec<_>>();
+        if !finalize_files.is_empty() {
+            if !branch_started {
+                created_branch = writer.create_migration_branch()?;
+                branch_started = true;
+            }
+            let finalize_strategies = finalize_files
+                .iter()
+                .filter_map(|fc| {
+                    let target_path = fc.target_path.as_deref()?;
+                    Some((target_path.to_string(), IntegrationStrategy::WriteAfter))
+                })
+                .collect::<HashMap<_, _>>();
+            let finalize_meta = preview
+                .units
+                .last()
+                .map(|u| u.meta.clone())
+                .unwrap_or_else(|| preview.units[0].meta.clone());
+            let apply = writer.apply_changeset_with_strategies(
                 &ChangeSet {
                     meta: finalize_meta,
                     files: finalize_files,
                 },
                 &finalize_strategies,
-            )
-            .map_err(|e| phase("execute", "unexpected_failure", e))?;
-        if apply.status != ApplyStatus::Ok {
-            let _ = writer.rollback(&checkpoint);
-            return Err(PhaseError {
-                phase: "execute",
-                error_type: "unexpected_failure",
-                message: format!("failed to finalize write_after: {:?}", apply.failed_paths),
-            });
-        }
-        if !case.squash_commits {
-            let message = commit_message::finalize_message();
-            if let Err(err) = writer.commit_with_message(&message) {
-                let _ = writer.rollback(&checkpoint);
-                return Err(phase("execute", "unexpected_failure", err));
+            )?;
+            if apply.status != ApplyStatus::Ok {
+                return Err(AppError::Apply(format!(
+                    "failed to finalize write_after: {:?}",
+                    apply.failed_paths
+                )));
             }
-            commits_applied += 1;
+            if !case.squash_commits {
+                let message = commit_message::finalize_message();
+                writer.commit_with_message(&message)?;
+                commits_applied += 1;
+            }
         }
-    }
 
-    if case.squash_commits {
-        let msg = case.squash_message.unwrap_or("relay squash");
-        let metas = preview
-            .units
-            .iter()
-            .map(|unit| unit.meta.clone())
-            .collect::<Vec<_>>();
-        let message = commit_message::squash_message(msg, &metas);
-        if let Err(err) = writer.commit_with_message(&message) {
-            let _ = writer.rollback(&checkpoint);
-            return Err(phase("execute", "unexpected_failure", err));
+        if case.squash_commits && branch_started {
+            let msg = case.squash_message.unwrap_or("relay squash");
+            let metas = preview
+                .units
+                .iter()
+                .map(|unit| unit.meta.clone())
+                .collect::<Vec<_>>();
+            let message = commit_message::squash_message(msg, &metas);
+            writer.commit_with_message(&message)?;
+            commits_applied = 1;
         }
-        commits_applied = 1;
-    }
 
-    let record = migration_record(&source, &target, &preview.units, &preview.aggregated);
+        Ok(commits_applied)
+    })();
+    let commits_applied = match execution {
+        Ok(commits_applied) => commits_applied,
+        Err(error) => {
+            return Err(execution_error_after_rollback(
+                &writer,
+                &checkpoint,
+                created_branch.as_deref(),
+                error,
+            ));
+        }
+    };
+
+    let target_branch = created_branch
+        .clone()
+        .unwrap_or_else(|| target.branch.clone());
+    let record = migration_record(
+        &source,
+        &target,
+        &target_branch,
+        &preview.units,
+        &preview.aggregated,
+    );
     Ok(MigrationOutput {
         commits_applied,
+        created_branch,
         record,
     })
+}
+
+fn execution_error_after_rollback(
+    writer: &MigrationWriter,
+    checkpoint: &VcsCheckpoint,
+    created_branch: Option<&str>,
+    error: AppError,
+) -> PhaseError {
+    let message = match writer.rollback(checkpoint, created_branch) {
+        Ok(()) => error.to_string(),
+        Err(rollback_error) => {
+            format!("migration failed: {error}; rollback failed: {rollback_error}")
+        }
+    };
+    PhaseError {
+        phase: "execute",
+        error_type: "unexpected_failure",
+        message,
+    }
 }
 
 fn unit_apply_strategy(
@@ -867,6 +905,7 @@ fn verify_success(
             ),
         });
     }
+    verify_successful_git_branch_state(case, target, baseline, output, *commit_count)?;
     verify_commit_messages(case, target, baseline, output, *commit_count)?;
     if case.checks_history {
         verify_history_record(case, output)?;
@@ -1001,6 +1040,118 @@ fn verify_manifest_equal(
             phase: "verify",
             error_type: "rollback_failed",
             message: format!("{case_id}: target changed after expected failure"),
+        })
+    }
+}
+
+fn verify_successful_git_branch_state(
+    case: &CaseSpec,
+    target: &Path,
+    baseline: &str,
+    output: &MigrationOutput,
+    commit_count: usize,
+) -> std::result::Result<(), PhaseError> {
+    if case.target != VcsKind::Git {
+        return Ok(());
+    }
+
+    let current = git(target, &["branch", "--show-current"])
+        .map_err(|e| phase("verify", "branch_mismatch", e))?
+        .trim()
+        .to_string();
+    let relay_branches = git(
+        target,
+        &["branch", "--list", "relay/*", "--format=%(refname:short)"],
+    )
+    .map_err(|e| phase("verify", "branch_mismatch", e))?;
+    let base_branch = case.target.branch();
+    let base_head = git(target, &["rev-parse", base_branch])
+        .map_err(|e| phase("verify", "branch_mismatch", e))?
+        .trim()
+        .to_string();
+
+    if base_head != baseline {
+        return Err(PhaseError {
+            phase: "verify",
+            error_type: "branch_mismatch",
+            message: format!("base branch {base_branch} moved from {baseline} to {base_head}"),
+        });
+    }
+
+    if commit_count == 0 {
+        if output.created_branch.is_some()
+            || current != base_branch
+            || !relay_branches.trim().is_empty()
+            || output.record.target.branch != base_branch
+        {
+            return Err(PhaseError {
+                phase: "verify",
+                error_type: "branch_mismatch",
+                message: format!(
+                    "no-op migration created a branch: current={current:?}, created={:?}, relay={relay_branches:?}, record={:?}",
+                    output.created_branch, output.record.target.branch
+                ),
+            });
+        }
+        return Ok(());
+    }
+
+    let created_branch = output.created_branch.as_deref().ok_or_else(|| PhaseError {
+        phase: "verify",
+        error_type: "branch_mismatch",
+        message: "Git migration did not report a created branch".into(),
+    })?;
+    if !created_branch.starts_with("relay/")
+        || current != created_branch
+        || !relay_branches
+            .lines()
+            .any(|branch| branch == created_branch)
+        || output.record.target.branch != created_branch
+    {
+        return Err(PhaseError {
+            phase: "verify",
+            error_type: "branch_mismatch",
+            message: format!(
+                "created branch mismatch: current={current:?}, created={created_branch:?}, relay={relay_branches:?}, record={:?}",
+                output.record.target.branch
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn verify_failed_git_branch_state(
+    case: &CaseSpec,
+    target: &Path,
+    baseline: &str,
+) -> std::result::Result<(), PhaseError> {
+    if case.target != VcsKind::Git {
+        return Ok(());
+    }
+
+    let base_branch = case.target.branch();
+    let current = git(target, &["branch", "--show-current"])
+        .map_err(|e| phase("verify", "rollback_failed", e))?
+        .trim()
+        .to_string();
+    let base_head = git(target, &["rev-parse", base_branch])
+        .map_err(|e| phase("verify", "rollback_failed", e))?
+        .trim()
+        .to_string();
+    let relay_branches = git(
+        target,
+        &["branch", "--list", "relay/*", "--format=%(refname:short)"],
+    )
+    .map_err(|e| phase("verify", "rollback_failed", e))?;
+    if current == base_branch && base_head == baseline && relay_branches.trim().is_empty() {
+        Ok(())
+    } else {
+        Err(PhaseError {
+            phase: "verify",
+            error_type: "rollback_failed",
+            message: format!(
+                "failed migration left branch state behind: current={current:?}, base_head={base_head:?}, baseline={baseline:?}, relay={relay_branches:?}"
+            ),
         })
     }
 }
@@ -1653,6 +1804,7 @@ fn repo_record(id: &str, path: &Path, vcs: VcsKind) -> RepoRecord {
 fn migration_record(
     source: &RepoRecord,
     target: &RepoRecord,
+    target_branch: &str,
     units: &[copy_diff_lib::model::PreviewUnit],
     aggregated: &[FileChange],
 ) -> MigrationRecord {
@@ -1693,7 +1845,7 @@ fn migration_record(
             name: target.name.clone(),
             path: target.path.clone(),
             repo_type: target.repo_type.clone(),
-            branch: target.branch.clone(),
+            branch: target_branch.to_string(),
         },
         commits,
         files,

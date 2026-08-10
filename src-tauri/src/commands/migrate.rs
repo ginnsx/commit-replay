@@ -16,7 +16,7 @@ use crate::{
             RepoSnapshot,
         },
     },
-    vcs::{ensure_different_repos, MigrationWriter},
+    vcs::{ensure_different_repos, MigrationWriter, VcsCheckpoint},
 };
 
 #[derive(Debug, serde::Serialize)]
@@ -24,6 +24,7 @@ pub struct MigrationResult {
     pub migration_id: String,
     pub commits_applied: usize,
     pub files_changed: usize,
+    pub created_branch: Option<String>,
 }
 
 fn validate_integration_plan(
@@ -192,6 +193,20 @@ struct MigrationOutput {
     record: MigrationRecord,
 }
 
+fn migration_error_after_rollback(
+    writer: &MigrationWriter,
+    checkpoint: &VcsCheckpoint,
+    created_branch: Option<&str>,
+    error: AppError,
+) -> AppError {
+    match writer.rollback(checkpoint, created_branch) {
+        Ok(()) => error,
+        Err(rollback_error) => AppError::Vcs(format!(
+            "migration failed: {error}; rollback failed: {rollback_error}"
+        )),
+    }
+}
+
 fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
     let MigrationWork {
         source,
@@ -239,116 +254,136 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
     let target_password = decrypt_repo_pass(&target)?;
     let writer = MigrationWriter::from_repo(&target, target_password)?;
     let checkpoint = writer.prepare(&target.branch)?;
-    let mut commits_applied = 0usize;
-    for unit in &preview.units {
-        let unit_strategies: std::collections::HashMap<String, IntegrationStrategy> = unit
-            .files
-            .iter()
-            .filter_map(|fc| {
-                let tp = fc.target_path.as_deref()?;
-                let agg = strategies.get(tp).copied()?;
-                let status = statuses.get(tp).copied()?;
-                Some((
-                    tp.to_string(),
-                    unit_apply_strategy(
-                        tp,
-                        agg,
-                        status,
-                        &resolved_blocked,
-                        squash_commits,
-                        fc.patch.is_some(),
-                    ),
-                ))
-            })
-            .collect();
-        if !unit_has_applicable_changes(unit, &unit_strategies) {
-            continue;
-        }
-        let apply = writer.apply_changeset_with_strategies(
-            &crate::model::ChangeSet {
-                meta: unit.meta.clone(),
-                files: unit.files.clone(),
-            },
-            &unit_strategies,
-        )?;
-        if apply.status != crate::model::ApplyStatus::Ok {
-            let _ = writer.rollback(&checkpoint);
-            return Err(AppError::Apply(format!(
-                "failed to apply {}: {:?}",
-                unit.meta.source_ref, apply.failed_paths
-            )));
-        }
-        if !squash_commits {
-            let message = commit_message::replay_message(&unit.meta);
-            if let Err(err) = writer.commit_allow_empty(&unit.meta, &message) {
-                let _ = writer.rollback(&checkpoint);
-                return Err(err);
-            }
-            commits_applied += 1;
-        }
-    }
-
-    let finalize_files: Vec<crate::model::FileChange> = preview
-        .aggregated
-        .iter()
-        .filter(|fc| {
-            fc.target_path.as_ref().is_some_and(|tp| {
-                strategies.get(tp).is_some_and(|s| {
-                    should_finalize_path(tp, *s, &resolved_blocked, squash_commits, migration_mode)
-                })
-            })
-        })
-        .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
-        .collect();
-    if !finalize_files.is_empty() {
-        let finalize_strategies: std::collections::HashMap<String, IntegrationStrategy> =
-            finalize_files
+    let mut created_branch = None;
+    let execution = (|| -> Result<usize, AppError> {
+        let mut branch_started = false;
+        let mut commits_applied = 0usize;
+        for unit in &preview.units {
+            let unit_strategies: std::collections::HashMap<String, IntegrationStrategy> = unit
+                .files
                 .iter()
                 .filter_map(|fc| {
                     let tp = fc.target_path.as_deref()?;
-                    Some((tp.to_string(), IntegrationStrategy::WriteAfter))
+                    let agg = strategies.get(tp).copied()?;
+                    let status = statuses.get(tp).copied()?;
+                    Some((
+                        tp.to_string(),
+                        unit_apply_strategy(
+                            tp,
+                            agg,
+                            status,
+                            &resolved_blocked,
+                            squash_commits,
+                            fc.patch.is_some(),
+                        ),
+                    ))
                 })
                 .collect();
-        let finalize_meta = preview
-            .units
-            .last()
-            .map(|u| u.meta.clone())
-            .unwrap_or_else(|| preview.units[0].meta.clone());
-        let apply = writer.apply_changeset_with_strategies(
-            &crate::model::ChangeSet {
-                meta: finalize_meta,
-                files: finalize_files,
-            },
-            &finalize_strategies,
-        )?;
-        if apply.status != crate::model::ApplyStatus::Ok {
-            let _ = writer.rollback(&checkpoint);
-            return Err(AppError::Apply(format!(
-                "failed to finalize write_after: {:?}",
-                apply.failed_paths
-            )));
-        }
-        if !squash_commits {
-            let message = commit_message::finalize_message();
-            if let Err(err) = writer.commit_with_message(&message) {
-                let _ = writer.rollback(&checkpoint);
-                return Err(err);
+            if !unit_has_applicable_changes(unit, &unit_strategies) {
+                continue;
             }
-            commits_applied += 1;
+            if !branch_started {
+                created_branch = writer.create_migration_branch()?;
+                branch_started = true;
+            }
+            let apply = writer.apply_changeset_with_strategies(
+                &crate::model::ChangeSet {
+                    meta: unit.meta.clone(),
+                    files: unit.files.clone(),
+                },
+                &unit_strategies,
+            )?;
+            if apply.status != crate::model::ApplyStatus::Ok {
+                return Err(AppError::Apply(format!(
+                    "failed to apply {}: {:?}",
+                    unit.meta.source_ref, apply.failed_paths
+                )));
+            }
+            if !squash_commits {
+                let message = commit_message::replay_message(&unit.meta);
+                writer.commit_allow_empty(&unit.meta, &message)?;
+                commits_applied += 1;
+            }
         }
-    }
 
-    if squash_commits {
-        let msg = squash_message.as_deref().expect("validated above");
-        let metas: Vec<crate::model::ReplayUnitMeta> =
-            preview.units.iter().map(|u| u.meta.clone()).collect();
-        let message = commit_message::squash_message(msg, &metas);
-        if let Err(err) = writer.commit_with_message(&message) {
-            let _ = writer.rollback(&checkpoint);
-            return Err(err);
+        let finalize_files: Vec<crate::model::FileChange> = preview
+            .aggregated
+            .iter()
+            .filter(|fc| {
+                fc.target_path.as_ref().is_some_and(|tp| {
+                    strategies.get(tp).is_some_and(|s| {
+                        should_finalize_path(
+                            tp,
+                            *s,
+                            &resolved_blocked,
+                            squash_commits,
+                            migration_mode,
+                        )
+                    })
+                })
+            })
+            .filter_map(|fc| prepare_finalize_file(fc, &resolved_blocked, &preview.units))
+            .collect();
+        if !finalize_files.is_empty() {
+            if !branch_started {
+                created_branch = writer.create_migration_branch()?;
+                branch_started = true;
+            }
+            let finalize_strategies: std::collections::HashMap<String, IntegrationStrategy> =
+                finalize_files
+                    .iter()
+                    .filter_map(|fc| {
+                        let tp = fc.target_path.as_deref()?;
+                        Some((tp.to_string(), IntegrationStrategy::WriteAfter))
+                    })
+                    .collect();
+            let finalize_meta = preview
+                .units
+                .last()
+                .map(|u| u.meta.clone())
+                .unwrap_or_else(|| preview.units[0].meta.clone());
+            let apply = writer.apply_changeset_with_strategies(
+                &crate::model::ChangeSet {
+                    meta: finalize_meta,
+                    files: finalize_files,
+                },
+                &finalize_strategies,
+            )?;
+            if apply.status != crate::model::ApplyStatus::Ok {
+                return Err(AppError::Apply(format!(
+                    "failed to finalize write_after: {:?}",
+                    apply.failed_paths
+                )));
+            }
+            if !squash_commits {
+                let message = commit_message::finalize_message();
+                writer.commit_with_message(&message)?;
+                commits_applied += 1;
+            }
         }
-        commits_applied = 1;
-    }
+
+        if squash_commits && branch_started {
+            let msg = squash_message.as_deref().expect("validated above");
+            let metas: Vec<crate::model::ReplayUnitMeta> =
+                preview.units.iter().map(|u| u.meta.clone()).collect();
+            let message = commit_message::squash_message(msg, &metas);
+            writer.commit_with_message(&message)?;
+            commits_applied = 1;
+        }
+
+        Ok(commits_applied)
+    })();
+    let commits_applied = match execution {
+        Ok(commits_applied) => commits_applied,
+        Err(error) => {
+            return Err(migration_error_after_rollback(
+                &writer,
+                &checkpoint,
+                created_branch.as_deref(),
+                error,
+            ));
+        }
+    };
 
     let files: Vec<crate::store::models::FileChangeView> = preview
         .aggregated
@@ -379,6 +414,9 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
 
     let migration_id = format!("m{}", chrono::Utc::now().timestamp_millis());
     let resolved_count = conflicts_resolved.max(resolved_blocked.len() as u32);
+    let target_branch = created_branch
+        .clone()
+        .unwrap_or_else(|| target.branch.clone());
     let record = MigrationRecord {
         id: migration_id.clone(),
         completed_at: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
@@ -392,7 +430,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             name: target.name.clone(),
             path: target.path.clone(),
             repo_type: target.repo_type.clone(),
-            branch: target.branch.clone(),
+            branch: target_branch,
         },
         commits,
         files,
@@ -406,6 +444,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
             migration_id: migration_id.clone(),
             commits_applied,
             files_changed: preview.aggregated.len(),
+            created_branch,
         },
         record,
     })

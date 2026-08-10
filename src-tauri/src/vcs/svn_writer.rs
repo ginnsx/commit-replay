@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::VcsWriter;
+use super::{VcsCheckpoint, VcsWriter};
 use crate::{
     error::{AppError, Result},
     model::{
@@ -313,7 +313,7 @@ impl SvnWriter {
 }
 
 impl VcsWriter for SvnWriter {
-    fn prepare(&self, _branch: &str) -> Result<String> {
+    fn prepare(&self, _branch: &str) -> Result<VcsCheckpoint> {
         let status = self.run_svn(&["status", "--ignore-externals"])?;
         let dirty: Vec<&str> = status
             .lines()
@@ -331,7 +331,10 @@ impl VcsWriter for SvnWriter {
             .run_svn(&["info", "--show-item", "revision"])?
             .trim()
             .to_string();
-        Ok(rev)
+        Ok(VcsCheckpoint {
+            reference: rev,
+            base_branch: None,
+        })
     }
 
     fn apply(&self, changeset: &ChangeSet) -> Result<ApplyResult> {
@@ -392,10 +395,10 @@ impl VcsWriter for SvnWriter {
         self.commit_with_message(&msg)
     }
 
-    fn rollback(&self, checkpoint: &str) -> Result<()> {
+    fn rollback(&self, checkpoint: &VcsCheckpoint, _created_branch: Option<&str>) -> Result<()> {
         self.run_svn(&["revert", "-R", "."])?;
-        if !checkpoint.is_empty() {
-            self.run_svn(&["update", "-r", checkpoint])?;
+        if !checkpoint.reference.is_empty() {
+            self.run_svn(&["update", "-r", &checkpoint.reference])?;
         }
         Ok(())
     }

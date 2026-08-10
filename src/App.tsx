@@ -119,6 +119,7 @@ export default function App() {
 
   const [migrated, setMigrated] = useState(false);
   const [lastMigrationId, setLastMigrationId] = useState<string | null>(null);
+  const [lastCreatedBranch, setLastCreatedBranch] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
 
   const updateSupported = isUpdateSupported();
@@ -567,6 +568,7 @@ export default function App() {
         squashCommitMessage.trim(),
       );
       setLastMigrationId(result.migrationId);
+      setLastCreatedBranch(result.createdBranch);
       setMigrated(true);
       await saveRepoPairMappings(sourceId, targetId, activeMappings, customMapping);
       await refreshMigrations();
@@ -666,6 +668,7 @@ export default function App() {
     setPreviewMeta(null);
     setIntegrationPlan(null);
     setLastMigrationId(null);
+    setLastCreatedBranch(null);
     setPathMappings([]);
     setCustomMapping(false);
     setSquashCommits(false);
@@ -1004,6 +1007,11 @@ export default function App() {
                   已将 {selectedCommits.size} 条提交从 <strong>{source?.name}</strong> 成功应用到{" "}
                   <strong>{target?.name}</strong>。 共变更 {previewMeta?.files.length ?? 0} 个文件。
                 </p>
+                {lastCreatedBranch && (
+                  <p>
+                    已创建并切换到新分支 <code>{lastCreatedBranch}</code>。
+                  </p>
+                )}
                 <div className="success-actions">
                   <button
                     type="button"

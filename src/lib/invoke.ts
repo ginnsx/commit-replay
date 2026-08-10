@@ -328,6 +328,7 @@ export async function executeMigration(
     migrationId: String(r.migration_id),
     commitsApplied: Number(r.commits_applied),
     filesChanged: Number(r.files_changed),
+    createdBranch: r.created_branch == null ? null : String(r.created_branch),
   };
 }
 

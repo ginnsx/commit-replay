@@ -6,6 +6,7 @@ use super::git_reader::GitReader;
 use super::git_writer::GitWriter;
 use super::svn_reader::SvnReader;
 use super::svn_writer::SvnWriter;
+use super::VcsCheckpoint;
 use super::VcsReader;
 use super::VcsWriter;
 
@@ -76,10 +77,17 @@ impl MigrationWriter {
         }
     }
 
-    pub fn prepare(&self, branch: &str) -> Result<String> {
+    pub fn prepare(&self, branch: &str) -> Result<VcsCheckpoint> {
         match self {
             MigrationWriter::Git(w) => w.prepare(branch),
             MigrationWriter::Svn(w) => w.prepare(branch),
+        }
+    }
+
+    pub fn create_migration_branch(&self) -> Result<Option<String>> {
+        match self {
+            MigrationWriter::Git(w) => w.create_migration_branch().map(Some),
+            MigrationWriter::Svn(_) => Ok(None),
         }
     }
 
@@ -115,10 +123,10 @@ impl MigrationWriter {
         }
     }
 
-    pub fn rollback(&self, checkpoint: &str) -> Result<()> {
+    pub fn rollback(&self, checkpoint: &VcsCheckpoint, created_branch: Option<&str>) -> Result<()> {
         match self {
-            MigrationWriter::Git(w) => w.rollback(checkpoint),
-            MigrationWriter::Svn(w) => w.rollback(checkpoint),
+            MigrationWriter::Git(w) => w.rollback(checkpoint, created_branch),
+            MigrationWriter::Svn(w) => w.rollback(checkpoint, created_branch),
         }
     }
 }

@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
 
-use super::VcsWriter;
+use super::{VcsCheckpoint, VcsWriter};
 use crate::{
     error::{AppError, Result},
     model::{
@@ -322,6 +322,38 @@ impl GitWriter {
         };
         self.commit_with_message_allow_empty(&msg)
     }
+
+    pub fn create_migration_branch(&self) -> Result<String> {
+        let base_name = migration_branch_base_name(chrono::Local::now().naive_local());
+        let branch_name = select_available_branch_name(&base_name, |candidate| {
+            self.run_git(&["branch", "--list", candidate])
+                .map(|output| !output.trim().is_empty())
+        })?;
+        self.run_git(&["checkout", "-b", &branch_name])?;
+        Ok(branch_name)
+    }
+}
+
+fn migration_branch_base_name(now: chrono::NaiveDateTime) -> String {
+    format!("relay/{}", now.format("%Y%m%d-%H%M%S-%3f"))
+}
+
+fn select_available_branch_name<F>(base_name: &str, mut exists: F) -> Result<String>
+where
+    F: FnMut(&str) -> Result<bool>,
+{
+    let mut suffix = 1usize;
+    loop {
+        let candidate = if suffix == 1 {
+            base_name.to_string()
+        } else {
+            format!("{base_name}-{suffix}")
+        };
+        if !exists(&candidate)? {
+            return Ok(candidate);
+        }
+        suffix += 1;
+    }
 }
 
 fn equivalent_text(a: &str, b: &str) -> bool {
@@ -330,7 +362,7 @@ fn equivalent_text(a: &str, b: &str) -> bool {
 }
 
 impl VcsWriter for GitWriter {
-    fn prepare(&self, branch: &str) -> Result<String> {
+    fn prepare(&self, branch: &str) -> Result<VcsCheckpoint> {
         let status = self.run_git(&["status", "--porcelain"])?;
         if !status.trim().is_empty() {
             return Err(AppError::Validation(
@@ -341,7 +373,15 @@ impl VcsWriter for GitWriter {
             self.run_git(&["checkout", branch])?;
         }
         let head = self.run_git(&["rev-parse", "HEAD"])?;
-        Ok(head.trim().to_string())
+        let base_branch = self.run_git(&["branch", "--show-current"])?;
+        let base_branch = match base_branch.trim() {
+            "" => None,
+            branch => Some(branch.to_string()),
+        };
+        Ok(VcsCheckpoint {
+            reference: head.trim().to_string(),
+            base_branch,
+        })
     }
 
     fn apply(&self, changeset: &ChangeSet) -> Result<ApplyResult> {
@@ -402,9 +442,17 @@ impl VcsWriter for GitWriter {
         self.commit_with_message(&msg)
     }
 
-    fn rollback(&self, checkpoint: &str) -> Result<()> {
-        self.run_git(&["reset", "--hard", checkpoint])?;
+    fn rollback(&self, checkpoint: &VcsCheckpoint, created_branch: Option<&str>) -> Result<()> {
+        self.run_git(&["reset", "--hard", &checkpoint.reference])?;
         self.run_git(&["clean", "-fd"])?;
+        if let Some(base_branch) = checkpoint.base_branch.as_deref() {
+            self.run_git(&["checkout", base_branch])?;
+        } else {
+            self.run_git(&["checkout", "--detach", &checkpoint.reference])?;
+        }
+        if let Some(created_branch) = created_branch {
+            self.run_git(&["branch", "-D", created_branch])?;
+        }
         Ok(())
     }
 }
@@ -430,4 +478,32 @@ fn walk(path: &Path, out: &mut Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+
+    use super::*;
+
+    #[test]
+    fn formats_migration_branch_name_with_milliseconds() {
+        let now = NaiveDate::from_ymd_opt(2026, 8, 10)
+            .and_then(|date| date.and_hms_milli_opt(15, 30, 12, 123))
+            .expect("valid test timestamp");
+
+        assert_eq!(migration_branch_base_name(now), "relay/20260810-153012-123");
+    }
+
+    #[test]
+    fn appends_incrementing_suffix_when_branch_name_exists() {
+        let existing = ["relay/20260810-153012-123", "relay/20260810-153012-123-2"];
+
+        let selected = select_available_branch_name("relay/20260810-153012-123", |candidate| {
+            Ok(existing.contains(&candidate))
+        })
+        .expect("branch selection should succeed");
+
+        assert_eq!(selected, "relay/20260810-153012-123-3");
+    }
 }

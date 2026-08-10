@@ -71,6 +71,14 @@ export function MigrationSummary({
                 <code>{target?.path ?? "未选择"}</code>
               </dd>
             </div>
+            {target?.type === "git" && (
+              <div>
+                <dt>目标分支</dt>
+                <dd>
+                  从 <code>{target.branch}</code> 自动创建 <code>relay/时间戳</code>
+                </dd>
+              </div>
+            )}
             <div>
               <dt>路径规则</dt>
               <dd>
