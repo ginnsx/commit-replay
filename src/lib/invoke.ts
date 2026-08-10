@@ -6,6 +6,7 @@ import type {
   FileChangeView,
   IntegrationItemView,
   IntegrationPlanResult,
+  MigrationComparisonResult,
   MigrationMode,
   MigrationRecord,
   MigrationResult,
@@ -100,6 +101,10 @@ export async function listMigrations(): Promise<MigrationRecord[]> {
 export async function getMigration(id: string): Promise<MigrationRecord | null> {
   const row = await invoke<Record<string, unknown> | null>("relay_get_migration", { id });
   return row ? normalizeMigration(row) : null;
+}
+
+export async function compareMigrationFiles(migrationId: string): Promise<MigrationComparisonResult> {
+  return invoke<MigrationComparisonResult>("compare_migration_files", { migrationId });
 }
 
 export async function getUpdateCheckState(): Promise<UpdateCheckState> {
@@ -359,6 +364,13 @@ function normalizeMigration(r: Record<string, unknown>): MigrationRecord {
       files: Number(c.files),
     })),
     files: (r.files as FileChangeView[]) ?? [],
+    comparisonFiles: ((r.comparison_files as Array<Record<string, unknown>>) ?? []).map((f) => ({
+      id: String(f.id),
+      sourcePath: String(f.source_path),
+      targetPath: String(f.target_path),
+      status: f.status as MigrationRecord["files"][number]["status"],
+      isBinary: Boolean(f.is_binary),
+    })),
     conflictsResolved: Number(r.conflicts_resolved ?? r.conflictsResolved ?? 0),
     status: String(r.status),
   };

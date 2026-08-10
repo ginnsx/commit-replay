@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod comparison;
 pub mod commit_message;
 pub mod diff;
 pub mod error;
@@ -11,6 +12,7 @@ pub mod store;
 pub mod vcs;
 
 use commands::{
+    comparison::compare_migration_files,
     migrate::execute_migration,
     preview::{
         build_integration_plan_cmd, build_preview, build_preview_meta, build_source_preview_meta,
@@ -80,6 +82,7 @@ pub fn run() {
             get_file_diff,
             build_integration_plan_cmd,
             detect_conflicts,
+            compare_migration_files,
             execute_migration,
             open_file_in_editor,
             open_file_in_system,

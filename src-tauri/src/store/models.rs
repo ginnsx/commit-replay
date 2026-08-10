@@ -125,6 +125,84 @@ pub struct FileChangeView {
     pub diff: Option<Vec<DiffLine>>,
 }
 
+/// Source/target paths for one file that participated in a completed migration.
+/// Stored with the history record so later comparisons do not need to infer a
+/// custom mapping from current repository settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrationFilePair {
+    pub id: String,
+    pub source_path: String,
+    pub target_path: String,
+    pub status: FileStatus,
+    #[serde(default)]
+    pub is_binary: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileComparisonStatus {
+    Identical,
+    FormatOnly,
+    Different,
+    SourceMissing,
+    TargetMissing,
+    BothMissing,
+    Unreadable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileContentKind {
+    Text,
+    Binary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileComparisonSummary {
+    pub total: u32,
+    pub identical: u32,
+    pub format_only: u32,
+    pub different: u32,
+    pub missing: u32,
+    pub unreadable: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationFileComparison {
+    pub id: String,
+    pub source_path: String,
+    pub target_path: String,
+    pub status: FileComparisonStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_kind: Option<FileContentKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff: Option<Vec<DiffLine>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationComparisonResult {
+    pub migration_id: String,
+    pub compared_at: String,
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub summary: FileComparisonSummary,
+    pub files: Vec<MigrationFileComparison>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationMode {
@@ -204,6 +282,8 @@ pub struct MigrationRecord {
     pub target: RepoSnapshot,
     pub commits: Vec<CommitSnapshot>,
     pub files: Vec<FileChangeView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub comparison_files: Vec<MigrationFilePair>,
     pub conflicts_resolved: u32,
     pub status: String,
 }

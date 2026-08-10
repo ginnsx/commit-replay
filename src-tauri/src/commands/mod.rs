@@ -1,3 +1,4 @@
+pub mod comparison;
 pub mod migrate;
 pub mod preview;
 pub mod reader;

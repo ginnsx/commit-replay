@@ -75,6 +75,57 @@ export interface FileChangeView {
   diff?: DiffLine[];
 }
 
+export interface MigrationFilePair {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  status: FileStatus;
+  isBinary: boolean;
+}
+
+export type FileComparisonStatus =
+  | "identical"
+  | "format_only"
+  | "different"
+  | "source_missing"
+  | "target_missing"
+  | "both_missing"
+  | "unreadable";
+
+export type FileContentKind = "text" | "binary";
+
+export interface FileComparisonSummary {
+  total: number;
+  identical: number;
+  formatOnly: number;
+  different: number;
+  missing: number;
+  unreadable: number;
+}
+
+export interface MigrationFileComparison {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  status: FileComparisonStatus;
+  contentKind?: FileContentKind;
+  sourceSize?: number;
+  targetSize?: number;
+  sourceSha256?: string;
+  targetSha256?: string;
+  diff?: DiffLine[];
+  message?: string;
+}
+
+export interface MigrationComparisonResult {
+  migrationId: string;
+  comparedAt: string;
+  available: boolean;
+  reason?: string;
+  summary: FileComparisonSummary;
+  files: MigrationFileComparison[];
+}
+
 export type MigrationMode = "incremental_first" | "commit_result" | "strict_replay";
 
 export type IntegrationStatus = "auto_ok" | "review" | "blocked";
@@ -157,6 +208,7 @@ export interface MigrationRecord {
   target: RepoSnapshot;
   commits: CommitSnapshot[];
   files: FileChangeView[];
+  comparisonFiles: MigrationFilePair[];
   conflictsResolved: number;
   status: string;
 }

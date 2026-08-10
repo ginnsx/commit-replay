@@ -2075,6 +2075,190 @@ textarea:focus {
   border: none;
   border-radius: 0;
 }
+.comparison-intro,
+.comparison-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.comparison-intro {
+  padding: 18px 20px;
+}
+.comparison-intro h3,
+.comparison-toolbar h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.comparison-intro p,
+.comparison-toolbar p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.comparison-error {
+  border-color: rgba(248, 81, 73, 0.35);
+}
+.migration-comparison {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+.comparison-toolbar {
+  padding: 0 2px;
+}
+.comparison-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.comparison-summary-identical {
+  color: var(--add);
+}
+.comparison-summary-format {
+  color: var(--accent);
+}
+.comparison-summary-different,
+.comparison-summary-missing,
+.comparison-summary-error {
+  color: var(--del);
+}
+.comparison-preview-layout {
+  min-height: 360px;
+}
+.comparison-file-list {
+  flex: 0 0 var(--file-list-basis);
+  min-width: var(--file-list-min);
+  max-width: var(--file-list-max);
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-base);
+}
+.comparison-file-list-body {
+  min-height: 0;
+  overflow: auto;
+}
+.comparison-file-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-left: 2px solid transparent;
+  text-align: left;
+  transition: background 0.1s;
+}
+.comparison-file-item:hover {
+  background: var(--bg-hover);
+}
+.comparison-file-item.active {
+  border-left-color: var(--accent);
+  background: var(--accent-dim);
+}
+.comparison-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.comparison-status {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+.comparison-status-identical,
+.comparison-status-both_missing {
+  background: var(--add-bg);
+  color: var(--add);
+}
+.comparison-status-format_only {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.comparison-status-different,
+.comparison-status-source_missing,
+.comparison-status-target_missing,
+.comparison-status-unreadable {
+  background: var(--del-bg);
+  color: var(--del);
+}
+.comparison-text-panel,
+.comparison-binary-panel {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+.comparison-text-panel .diff-panel {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+}
+.comparison-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.comparison-detail-header > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.comparison-detail-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.comparison-detail-header span:not(.comparison-status),
+.comparison-detail-message {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.comparison-detail-message {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.comparison-binary-meta {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  padding: 16px;
+}
+.comparison-binary-meta div {
+  display: contents;
+}
+.comparison-binary-meta dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.comparison-binary-meta dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12px;
+}
 .commit-row.readonly {
   cursor: default;
 }

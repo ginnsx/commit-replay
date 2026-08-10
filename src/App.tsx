@@ -55,7 +55,11 @@ import { PathMappingPanel } from "./components/relay/PathMappingPanel";
 import { VcsBadge } from "./components/relay/Badges";
 import { EditorSettings, RepoManagement } from "./components/settings/SettingsPanels";
 import { UpdateSettings } from "./components/settings/UpdateSettings";
-import { MigrationDetail, MigrationHistory } from "./components/settings/MigrationHistory";
+import {
+  MigrationDetail,
+  MigrationHistory,
+  type MigrationDetailTab,
+} from "./components/settings/MigrationHistory";
 import { IconArrow, IconChevronRight, IconPlus, IconSuccess } from "./components/relay/icons";
 import type { CommitListItem } from "./lib/types";
 import {
@@ -83,6 +87,7 @@ export default function App() {
     "repos",
   );
   const [historyDetailId, setHistoryDetailId] = useState<string | null>(null);
+  const [historyDetailTab, setHistoryDetailTab] = useState<MigrationDetailTab>("commits");
 
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -762,11 +767,19 @@ export default function App() {
           />
         ) : historyDetailId ? (
           <MigrationDetail
+            key={historyDetailId}
             record={migrations.find((r) => r.id === historyDetailId)}
             onBack={() => setHistoryDetailId(null)}
+            initialTab={historyDetailTab}
           />
         ) : (
-          <MigrationHistory records={migrations} onSelect={setHistoryDetailId} />
+          <MigrationHistory
+            records={migrations}
+            onSelect={(id) => {
+              setHistoryDetailId(id);
+              setHistoryDetailTab("commits");
+            }}
+          />
         )}
       </div>
     </div>
@@ -999,9 +1012,22 @@ export default function App() {
                       setShowRepos(true);
                       setSettingsTab("history");
                       setHistoryDetailId(lastMigrationId);
+                      setHistoryDetailTab("commits");
                     }}
                   >
                     查看本次记录
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setShowRepos(true);
+                      setSettingsTab("history");
+                      setHistoryDetailId(lastMigrationId);
+                      setHistoryDetailTab("compare");
+                    }}
+                  >
+                    对比本次文件
                   </button>
                   <button type="button" className="btn btn-primary" onClick={startNewMigration}>
                     开始新的迁移

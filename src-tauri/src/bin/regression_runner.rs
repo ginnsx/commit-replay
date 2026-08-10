@@ -7,6 +7,7 @@ use std::{
 };
 
 use copy_diff_lib::{
+    comparison::migration_file_pairs,
     commit_message,
     error::{AppError, Result as AppResult},
     model::{ApplyStatus, ChangeSet, FileChange, PreviewUnit},
@@ -1678,6 +1679,7 @@ fn migration_record(
         .iter()
         .map(preview_file_with_diff)
         .collect::<Vec<FileChangeView>>();
+    let comparison_files = migration_file_pairs(aggregated);
     MigrationRecord {
         id: format!("m{}", chrono::Utc::now().timestamp_millis()),
         completed_at: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
@@ -1695,6 +1697,7 @@ fn migration_record(
         },
         commits,
         files,
+        comparison_files,
         conflicts_resolved: 0,
         status: "success".into(),
     }

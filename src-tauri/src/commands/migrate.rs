@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::{
+    comparison::migration_file_pairs,
     commit_message,
     error::AppError,
     preview::{
@@ -354,6 +355,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         .iter()
         .map(|f| preview_file_with_diff(f))
         .collect();
+    let comparison_files = migration_file_pairs(&preview.aggregated);
     let commits: Vec<CommitSnapshot> = preview
         .units
         .iter()
@@ -394,6 +396,7 @@ fn run_migration(work: MigrationWork) -> Result<MigrationOutput, AppError> {
         },
         commits,
         files,
+        comparison_files,
         conflicts_resolved: resolved_count,
         status: "success".into(),
     };

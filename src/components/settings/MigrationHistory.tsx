@@ -6,6 +6,9 @@ import { CommitRowReadonly } from "../relay/CommitRow";
 import { DiffView } from "../relay/DiffView";
 import { FileTree } from "../relay/FileTree";
 import { IconArrow, IconChevronLeft, IconChevronRight } from "../relay/icons";
+import { MigrationComparison } from "./MigrationComparison";
+
+export type MigrationDetailTab = "commits" | "files" | "compare";
 
 export function MigrationHistory({
   records,
@@ -92,11 +95,13 @@ export function MigrationHistory({
 export function MigrationDetail({
   record,
   onBack,
+  initialTab = "commits",
 }: {
   record?: MigrationRecord | null;
   onBack: () => void;
+  initialTab?: MigrationDetailTab;
 }) {
-  const [detailTab, setDetailTab] = useState<"commits" | "files">("commits");
+  const [detailTab, setDetailTab] = useState<MigrationDetailTab>(initialTab);
   const [activeFileId, setActiveFileId] = useState<string | null>(record?.files[0]?.id ?? null);
 
   if (!record) {
@@ -181,6 +186,13 @@ export function MigrationDetail({
         >
           文件变更
         </button>
+        <button
+          type="button"
+          className={`history-detail-tab${detailTab === "compare" ? " active" : ""}`}
+          onClick={() => setDetailTab("compare")}
+        >
+          源 / 目标对比
+        </button>
       </div>
       {detailTab === "commits" ? (
         <div className="card">
@@ -190,11 +202,13 @@ export function MigrationDetail({
             ))}
           </div>
         </div>
-      ) : (
+      ) : detailTab === "files" ? (
         <div className="history-preview-layout">
           <FileTree files={record.files} activeId={activeFileId} onSelect={setActiveFileId} />
           <DiffView file={activeFile} />
         </div>
+      ) : (
+        <MigrationComparison record={record} autoRun={initialTab === "compare"} />
       )}
     </div>
   );
