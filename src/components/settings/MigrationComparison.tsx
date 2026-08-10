@@ -130,7 +130,11 @@ export function MigrationComparison({
         </div>
       ) : (
         <div className="history-preview-layout comparison-preview-layout">
-          <ComparisonFileList files={result.files} activeId={activeFile?.id ?? null} onSelect={setActiveId} />
+          <ComparisonFileList
+            files={result.files}
+            activeId={activeFile?.id ?? null}
+            onSelect={setActiveId}
+          />
           <ComparisonDetail file={activeFile} />
         </div>
       )}

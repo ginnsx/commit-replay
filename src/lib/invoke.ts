@@ -103,7 +103,9 @@ export async function getMigration(id: string): Promise<MigrationRecord | null> 
   return row ? normalizeMigration(row) : null;
 }
 
-export async function compareMigrationFiles(migrationId: string): Promise<MigrationComparisonResult> {
+export async function compareMigrationFiles(
+  migrationId: string,
+): Promise<MigrationComparisonResult> {
   return invoke<MigrationComparisonResult>("compare_migration_files", { migrationId });
 }
 
