@@ -7,8 +7,8 @@ pub mod ref_util;
 pub use cli::SvnCredentials;
 pub(crate) use cli::decode_svn_output;
 pub use cli::{
-    detect_svn_branch, probe_svn_wc, run_svn, svn_cat_file, svn_diff_revision, svn_log_revision_xml,
-    svn_log_xml, svn_log_xml_paged,
+    detect_svn_branch, probe_svn_wc, run_svn, svn_cat_file, svn_cat_file_bytes,
+    svn_diff_revision, svn_log_revision_xml, svn_log_xml, svn_log_xml_paged,
 };
 pub use diff_parser::parse_unified_diff;
 pub use log_parser::parse_log_xml;

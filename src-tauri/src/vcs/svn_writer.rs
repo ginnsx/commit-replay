@@ -57,6 +57,10 @@ impl SvnWriter {
     }
 
     fn write_file(&self, rel_path: &str, content: &str) -> Result<()> {
+        self.write_file_bytes(rel_path, content.as_bytes())
+    }
+
+    fn write_file_bytes(&self, rel_path: &str, content: &[u8]) -> Result<()> {
         let path = resolve_wc_path(&self.wc_path, rel_path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -64,6 +68,14 @@ impl SvnWriter {
         std::fs::write(&path, content)?;
         self.schedule_add_if_needed(rel_path)?;
         Ok(())
+    }
+
+    fn write_binary_file(&self, fc: &FileChange, target: &str) -> Result<()> {
+        let content = fc
+            .after_bytes
+            .as_deref()
+            .ok_or_else(|| AppError::Apply(format!("binary content missing for {target}")))?;
+        self.write_file_bytes(target, content)
     }
 
     fn delete_file(&self, rel_path: &str) -> Result<()> {
@@ -161,11 +173,7 @@ impl SvnWriter {
                     }
                 }
                 FileChangeKind::Binary => {
-                    if let Some(after) = fc.after.as_ref() {
-                        self.write_file(target, after)
-                    } else {
-                        Ok(())
-                    }
+                    self.write_binary_file(fc, target)
                 }
             },
         }
@@ -202,11 +210,7 @@ impl SvnWriter {
                 }
             }
             FileChangeKind::Binary => {
-                if let Some(after) = fc.after.as_ref() {
-                    self.write_file(target, after)
-                } else {
-                    Ok(())
-                }
+                self.write_binary_file(fc, target)
             }
         }
     }
@@ -246,11 +250,7 @@ impl SvnWriter {
             }
             FileChangeKind::Delete => self.delete_file(target),
             FileChangeKind::Binary => {
-                if let Some(after) = fc.after.as_ref() {
-                    self.write_file(target, after)
-                } else {
-                    Ok(())
-                }
+                self.write_binary_file(fc, target)
             }
         }
     }

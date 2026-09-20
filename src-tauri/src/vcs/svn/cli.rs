@@ -80,6 +80,11 @@ pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<Strin
     Ok(decode_svn_output(&output.stdout))
 }
 
+/// Run an SVN subcommand and preserve stdout exactly for binary content.
+pub fn run_svn_bytes(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<Vec<u8>> {
+    run_svn_output(url, creds, args).map(|output| output.stdout)
+}
+
 pub fn svn_log_xml(url: &str, creds: &SvnCredentials, limit: usize) -> Result<String> {
     run_svn(
         url,
@@ -129,6 +134,18 @@ pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) ->
 
 pub fn svn_cat_file(creds: &SvnCredentials, revision: u64, file_path: &str) -> Result<String> {
     run_svn(
+        file_path,
+        creds,
+        &["cat", "-r", &revision.to_string()],
+    )
+}
+
+pub fn svn_cat_file_bytes(
+    creds: &SvnCredentials,
+    revision: u64,
+    file_path: &str,
+) -> Result<Vec<u8>> {
+    run_svn_bytes(
         file_path,
         creds,
         &["cat", "-r", &revision.to_string()],

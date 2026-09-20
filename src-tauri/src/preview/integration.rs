@@ -58,6 +58,9 @@ fn line_match_ratio(a: &str, b: &str) -> f32 {
 }
 
 fn target_has_expected_content(fc: &FileChange) -> bool {
+    if matches!(fc.kind, FileChangeKind::Binary) {
+        return false;
+    }
     if let Some(patch) = fc.patch.as_deref() {
         let expected = reconstruct_new_from_patch(patch);
         if !expected.is_empty()
@@ -416,6 +419,7 @@ mod tests {
             before: Some(before.into()),
             after: Some(after.into()),
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: Some(patch.into()),
             conflict_risk: None,
@@ -433,6 +437,7 @@ mod tests {
             before: Some("target\n".into()),
             after: Some("target\n".into()),
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: Some("@@ -1,1 +1,1 @@\n-old\n+new\n".into()),
             conflict_risk: Some(crate::model::ConflictRisk::High),
@@ -500,6 +505,7 @@ mod tests {
             before: Some("exists\n".into()),
             after: Some("new\n".into()),
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: Some("@@ -0,0 +1,1 @@\n+new\n".into()),
             conflict_risk: None,
@@ -595,6 +601,7 @@ mod tests {
             before: Some("line1\nline2\n".into()),
             after: Some("line1\nline2\n".into()),
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: Some("@@ -0,0 +1,2 @@\n+line1\n+line2\n".into()),
             conflict_risk: None,
@@ -608,6 +615,34 @@ mod tests {
         );
         assert_eq!(plan.auto_ok_count, 1);
         assert_eq!(plan.items[0].strategy, IntegrationStrategy::Skip);
+    }
+
+    #[test]
+    fn binary_with_payload_requires_review_and_write_after() {
+        let fc = FileChange {
+            path: "assets/report.xlsx".into(),
+            target_path: Some("assets/report.xlsx".into()),
+            kind: FileChangeKind::Binary,
+            old_path: None,
+            before: None,
+            after: None,
+            source_after: None,
+            after_bytes: Some(vec![0x50, 0x4b, 0x03, 0x04, 0xff]),
+            source_ref: Some("svn:42".into()),
+            patch: None,
+            conflict_risk: Some(crate::model::ConflictRisk::Low),
+            analysis: None,
+        };
+
+        let plan = build_integration_plan(
+            &[fc],
+            ".",
+            TargetWcKind::Git,
+            MigrationMode::IncrementalFirst,
+        );
+
+        assert_eq!(plan.items[0].integration_status, IntegrationStatus::Review);
+        assert_eq!(plan.items[0].strategy, IntegrationStrategy::WriteAfter);
     }
 
     fn analysis(

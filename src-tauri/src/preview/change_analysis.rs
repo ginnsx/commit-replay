@@ -311,6 +311,7 @@ mod tests {
             before: before.map(str::to_string),
             after: None,
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: Some(patch.into()),
             conflict_risk: Some(ConflictRisk::Low),

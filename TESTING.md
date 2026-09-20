@@ -187,7 +187,7 @@ artifacts/regression/<run_id>/
 |------|------|
 | `smoke` | `I01-GG`, `I03-GG`, `I04-GG` |
 | `production-safety` | `I01-GG` - `I08-GG`, `D01-GG`, `D03-GG`, `D04-GG-rename`, `D05-GG-binary`, `D06-GG-crlf`, `D07-GG-empty`, `D08-GG-no-final-newline`, `D09-GG-chinese`, `D10-GG-longest-prefix`, Windows 下另含 `D11-GG-case-only-rename`, `E01-GG-partial-unmapped`, `E02-GG-directory-conflict`, `M01-GG-commit-result`, `M02-GG-strict-replay`, `M03-GG-squash`, `M04-GG-squash-empty-message`, `F10-GG-already-expected`, `F11-GG-context-drift-auto-merge`, `F12-GG-already-contained-skip`, `F13-GG-same-region-conflict`, `F14-GG-multiple-candidates-blocked` |
-| `release` | `production-safety` + `SG01-SVN-Git-add`, `SG02-SVN-Git-modify`, `SG03-SVN-Git-move`, `SG04-SVN-Git-multi`, `SG05-SVN-Git-chinese`, `GS01-Git-SVN-add`, `GS02-Git-SVN-delete`, `GS03-Git-SVN-dirty`, `GS04-Git-SVN-chinese`, `SS01-SVN-SVN-add`, `SS02-SVN-SVN-delete`, `SS03-SVN-SVN-chinese` |
+| `release` | `production-safety` + `SG01-SVN-Git-add`, `SG02-SVN-Git-modify`, `SG03-SVN-Git-move`, `SG04-SVN-Git-multi`, `SG05-SVN-Git-chinese`, `SG06-SVN-Git-binary-overwrite`, `GS01-Git-SVN-add`, `GS02-Git-SVN-delete`, `GS03-Git-SVN-dirty`, `GS04-Git-SVN-chinese`, `GS05-Git-SVN-binary-overwrite`, `SS01-SVN-SVN-add`, `SS02-SVN-SVN-delete`, `SS03-SVN-SVN-chinese`, `SS04-SVN-SVN-binary-overwrite` |
 
 失败时优先查看：
 
@@ -272,7 +272,7 @@ svn log -l 10 <target>
 | `C02-modify-text` | 修改 `src/existing.txt` 的中间一行 | 普通补丁应用 |
 | `C03-delete-text` | 删除 `src/delete_me.txt` | 删除文件 |
 | `C04-rename-text` | `src/move_me.txt` 移动到 `moved/move_me.txt` | 移动/重命名 |
-| `C05-binary-add` | 新增或修改 `assets/blob.bin` | 二进制文件处理 |
+| `C05-binary-add` | 新增或修改 `assets/report.xlsx` | 含非 UTF-8 字节的 Excel 文件处理与精确覆盖 |
 | `C06-crlf-add` | 新增或修改包含 CRLF 的文件 | 换行兼容 |
 | `C07-same-file-step1` | 修改 `src/chain.txt` 第 2 行为 `step1` | 多提交同文件顺序 |
 | `C08-same-file-step2` | 修改 `src/chain.txt` 第 2 行为 `step2` | 多提交同文件最终结果 |

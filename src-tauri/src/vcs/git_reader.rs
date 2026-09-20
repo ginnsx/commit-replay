@@ -56,9 +56,8 @@ impl GitReader {
             .map(|output| decode_git_text_output(&output.stdout))
     }
 
-    fn run_git_lossy(&self, args: &[&str]) -> Result<String> {
-        self.run_git_output(args)
-            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    fn run_git_bytes(&self, args: &[&str]) -> Result<Vec<u8>> {
+        self.run_git_output(args).map(|output| output.stdout)
     }
 
     pub fn list_recent_paged(
@@ -135,16 +134,13 @@ pub fn load_changeset_with_meta(reader: &GitReader, meta: ReplayUnitMeta) -> Res
         if !matches!(fc.kind, crate::model::FileChangeKind::Delete) {
             let blob_path = fc.path.trim_start_matches('/');
             let object = format!("{sha}:{blob_path}");
-            let content = if matches!(fc.kind, crate::model::FileChangeKind::Binary) {
-                // Binary payloads still follow the existing path until they are modeled as bytes.
-                reader.run_git_lossy(&["show", &object])
-            } else {
-                reader.run_git(&["show", &object])
-            };
-            if let Ok(content) = content {
+            if matches!(fc.kind, crate::model::FileChangeKind::Binary) {
+                if let Ok(content) = reader.run_git_bytes(&["show", &object]) {
+                    fc.after_bytes = Some(content);
+                }
+            } else if let Ok(content) = reader.run_git(&["show", &object]) {
                 fc.source_after = Some(content.clone());
-                if fc.kind == crate::model::FileChangeKind::Binary
-                    || (fc.kind == crate::model::FileChangeKind::Add && fc.patch.is_none())
+                if (fc.kind == crate::model::FileChangeKind::Add && fc.patch.is_none())
                     || (fc.kind == crate::model::FileChangeKind::Rename && fc.patch.is_none())
                 {
                     fc.after = Some(content);

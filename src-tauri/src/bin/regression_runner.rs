@@ -45,7 +45,8 @@ const EMPTY_FILE: &str = "";
 const CHINESE_FILE: &str = "中文内容\n第二行\n";
 const MODULE_FILE: &str = "module mapped\n";
 const CASE_FILE: &str = "case\n";
-const BINARY_FILE: &[u8] = b"relay\0binary\nafter\n";
+const BINARY_FILE: &[u8] = b"PK\x03\x04relay\0binary\xff\nafter\n";
+const OLD_BINARY_FILE: &[u8] = b"old excel placeholder\0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Suite {
@@ -95,6 +96,7 @@ enum TargetSetup {
     DriftedModify,
     SameRegionModify,
     MultiCandidateModify,
+    ExistingBinaryFile,
 }
 
 #[derive(Debug, Clone)]
@@ -1241,6 +1243,14 @@ fn write_source_commits(
     if needed_refs.is_empty() {
         return Ok(refs);
     }
+    if needed_refs.len() == 1 && needed_refs.contains("C05-binary-add") {
+        write_bytes(path, vcs.source_rel("assets/report.xlsx"), BINARY_FILE)?;
+        refs.insert(
+            "C05-binary-add".into(),
+            commit_ref(path, vcs, "C05-binary-add")?,
+        );
+        return Ok(refs);
+    }
 
     write_text(path, vcs.source_rel("src/new_file.txt"), NEW_FILE)?;
     refs.insert(
@@ -1278,7 +1288,7 @@ fn write_source_commits(
         return Ok(refs);
     }
 
-    write_bytes(path, vcs.source_rel("assets/blob.bin"), BINARY_FILE)?;
+    write_bytes(path, vcs.source_rel("assets/report.xlsx"), BINARY_FILE)?;
     refs.insert(
         "C05-binary-add".into(),
         commit_ref(path, vcs, "C05-binary-add")?,
@@ -1479,6 +1489,10 @@ fn apply_target_setup(target: &Path, vcs: VcsKind, setup: TargetSetup) -> AppRes
                 MULTI_CANDIDATE_EXISTING,
             )?;
             commit_target(target, vcs, "target has multiple candidate blocks")?;
+        }
+        TargetSetup::ExistingBinaryFile => {
+            write_bytes(target, vcs.target_rel("assets/report.xlsx"), OLD_BINARY_FILE)?;
+            commit_target(target, vcs, "target has old binary file")?;
         }
     }
     Ok(())
@@ -2004,15 +2018,20 @@ fn git_safety_cases() -> Vec<CaseSpec> {
             vec!["src/move_me.txt"],
             1,
         ),
-        success_case(
-            "D05-GG-binary",
-            VcsKind::Git,
-            VcsKind::Git,
-            vec!["C05-binary-add"],
-            changed(&[("assets/blob.bin", ExpectedContent::Bytes(BINARY_FILE))]),
-            vec![],
-            1,
-        ),
+        {
+            let mut c = success_case(
+                "D05-GG-binary",
+                VcsKind::Git,
+                VcsKind::Git,
+                vec!["C05-binary-add"],
+                changed(&[("assets/report.xlsx", ExpectedContent::Bytes(BINARY_FILE))]),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::ExistingBinaryFile;
+            c.accept_review = true;
+            c
+        },
         success_case(
             "D06-GG-crlf",
             VcsKind::Git,
@@ -2290,6 +2309,20 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             vec![],
             1,
         ),
+        {
+            let mut c = success_case(
+                "SG06-SVN-Git-binary-overwrite",
+                VcsKind::Svn,
+                VcsKind::Git,
+                vec!["C05-binary-add"],
+                changed(&[("assets/report.xlsx", ExpectedContent::Bytes(BINARY_FILE))]),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::ExistingBinaryFile;
+            c.accept_review = true;
+            c
+        },
         success_case(
             "GS01-Git-SVN-add",
             VcsKind::Git,
@@ -2336,6 +2369,23 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             vec![],
             1,
         ),
+        {
+            let mut c = success_case(
+                "GS05-Git-SVN-binary-overwrite",
+                VcsKind::Git,
+                VcsKind::Svn,
+                vec!["C05-binary-add"],
+                changed(&[(
+                    "trunk/assets/report.xlsx",
+                    ExpectedContent::Bytes(BINARY_FILE),
+                )]),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::ExistingBinaryFile;
+            c.accept_review = true;
+            c
+        },
         success_case(
             "SS01-SVN-SVN-add",
             VcsKind::Svn,
@@ -2367,6 +2417,23 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             vec![],
             1,
         ),
+        {
+            let mut c = success_case(
+                "SS04-SVN-SVN-binary-overwrite",
+                VcsKind::Svn,
+                VcsKind::Svn,
+                vec!["C05-binary-add"],
+                changed(&[(
+                    "trunk/assets/report.xlsx",
+                    ExpectedContent::Bytes(BINARY_FILE),
+                )]),
+                vec![],
+                1,
+            );
+            c.target_setup = TargetSetup::ExistingBinaryFile;
+            c.accept_review = true;
+            c
+        },
     ]
 }
 

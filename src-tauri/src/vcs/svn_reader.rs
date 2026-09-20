@@ -6,7 +6,7 @@ use crate::{
 use super::VcsReader;
 use super::svn::{
     parse_log_xml, parse_svn_revision, parse_unified_diff, probe_svn_wc, svn_cat_file,
-    svn_diff_revision, svn_log_revision_xml, svn_log_xml_paged, SvnCredentials,
+    svn_cat_file_bytes, svn_diff_revision, svn_log_revision_xml, svn_log_xml_paged, SvnCredentials,
 };
 
 #[derive(Clone)]
@@ -88,15 +88,23 @@ pub fn attach_source_after_file(
     use crate::model::FileChangeKind;
     use std::path::Path;
 
-    if fc.source_after.is_some() {
+    if fc.source_after.is_some() || fc.after_bytes.is_some() {
         return;
     }
-    if matches!(fc.kind, FileChangeKind::Delete | FileChangeKind::Binary) {
+    if matches!(fc.kind, FileChangeKind::Delete) {
         return;
     }
     let rel = fc.path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR);
     let file_path = Path::new(&reader.wc_path).join(rel);
-    if let Ok(content) = svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy()) {
+    if matches!(fc.kind, FileChangeKind::Binary) {
+        if let Ok(content) =
+            svn_cat_file_bytes(&reader.creds(), revision, &file_path.to_string_lossy())
+        {
+            fc.after_bytes = Some(content);
+        }
+    } else if let Ok(content) =
+        svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy())
+    {
         fc.source_after = Some(content);
     }
 }

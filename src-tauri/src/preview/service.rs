@@ -536,6 +536,7 @@ fn merge_file_changes_for_source_preview(
         before,
         after,
         source_after: latest.source_after.clone(),
+        after_bytes: latest.after_bytes.clone(),
         source_ref: None,
         patch,
         conflict_risk: latest.conflict_risk.clone(),
@@ -582,6 +583,23 @@ fn merge_file_changes_for_preview(
     let wc_before = read_wc_file(&wc_path);
     let latest = ordered.last().expect("non-empty");
 
+    if latest.kind == FileChangeKind::Binary {
+        return Ok(Some(FileChange {
+            path: latest.path.clone(),
+            target_path: Some(target_path.to_string()),
+            kind: FileChangeKind::Binary,
+            old_path: latest.old_path.clone(),
+            before: None,
+            after: None,
+            source_after: None,
+            after_bytes: latest.after_bytes.clone(),
+            source_ref: None,
+            patch: None,
+            conflict_risk: Some(ConflictRisk::Low),
+            analysis: None,
+        }));
+    }
+
     if latest.kind == FileChangeKind::Add && wc_before.is_some() {
         let display_patch = merge_patches_for_display(&ordered).or_else(|| latest.patch.clone());
         let after_content = latest
@@ -598,6 +616,7 @@ fn merge_file_changes_for_preview(
             before: wc_before,
             after: after_content,
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: display_patch,
             conflict_risk: Some(ConflictRisk::High),
@@ -617,6 +636,7 @@ fn merge_file_changes_for_preview(
             before: wc_before,
             after: None,
             source_after: None,
+            after_bytes: None,
             source_ref: None,
             patch: None,
             conflict_risk: Some(ConflictRisk::Low),
@@ -709,6 +729,7 @@ fn merge_file_changes_for_preview(
         before: wc_before.clone(),
         after: after_content,
         source_after: latest.source_after.clone(),
+        after_bytes: latest.after_bytes.clone(),
         source_ref: None,
         patch: display_patch.clone(),
         conflict_risk: Some(conflict_risk),
@@ -826,6 +847,7 @@ mod tests {
             before: None,
             after: None,
             source_after: None,
+            after_bytes: None,
             source_ref: Some(source_ref.into()),
             patch,
             conflict_risk: None,
@@ -862,6 +884,7 @@ mod tests {
                 before: None,
                 after: None,
                 source_after: None,
+                after_bytes: None,
                 source_ref: Some("svn:50545".into()),
                 patch: Some(add_rows.into()),
                 conflict_risk: None,
@@ -875,6 +898,7 @@ mod tests {
                 before: None,
                 after: None,
                 source_after: None,
+                after_bytes: None,
                 source_ref: Some("svn:50556".into()),
                 patch: Some(remove_style.into()),
                 conflict_risk: None,
@@ -937,6 +961,7 @@ mod tests {
             before: None,
             after: None,
             source_after: None,
+            after_bytes: None,
             source_ref: Some("svn:50556".into()),
             patch: Some(patch),
             conflict_risk: None,

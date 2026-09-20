@@ -104,6 +104,9 @@ pub struct FileChange {
     pub after: Option<String>,
     /// Post-change content on the source side (e.g. svn cat @ revision)
     pub source_after: Option<String>,
+    /// Raw post-change content for binary files. Kept backend-only.
+    #[serde(skip)]
+    pub after_bytes: Option<Vec<u8>>,
     /// Source commit ref for lazy source_after loading
     pub source_ref: Option<String>,
     /// Raw unified diff hunk (text files only)

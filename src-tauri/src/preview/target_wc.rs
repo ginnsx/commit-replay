@@ -44,10 +44,10 @@ fn svn_check_apply(_wc_root: &str, fc: &FileChange) -> ConflictRisk {
 }
 
 pub(crate) fn ensure_source_after(reader: &SourceReader, fc: &mut FileChange) -> Result<()> {
-    if fc.source_after.is_some() {
+    if fc.source_after.is_some() || fc.after_bytes.is_some() {
         return Ok(());
     }
-    if matches!(fc.kind, FileChangeKind::Delete | FileChangeKind::Binary) {
+    if matches!(fc.kind, FileChangeKind::Delete) {
         return Ok(());
     }
     if let SourceReader::Svn(svn) = reader {

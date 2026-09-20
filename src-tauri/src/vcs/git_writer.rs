@@ -37,12 +37,24 @@ impl GitWriter {
     }
 
     fn write_file(&self, rel_path: &str, content: &str) -> Result<()> {
+        self.write_file_bytes(rel_path, content.as_bytes())
+    }
+
+    fn write_file_bytes(&self, rel_path: &str, content: &[u8]) -> Result<()> {
         let path = resolve_wc_path(&self.repo_path, rel_path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, content)?;
         Ok(())
+    }
+
+    fn write_binary_file(&self, fc: &FileChange, target: &str) -> Result<()> {
+        let content = fc
+            .after_bytes
+            .as_deref()
+            .ok_or_else(|| AppError::Apply(format!("binary content missing for {target}")))?;
+        self.write_file_bytes(target, content)
     }
 
     fn delete_file(&self, rel_path: &str) -> Result<()> {
@@ -154,11 +166,7 @@ impl GitWriter {
                     }
                 }
                 FileChangeKind::Binary => {
-                    if let Some(after) = fc.after.as_ref() {
-                        self.write_file(target, after)
-                    } else {
-                        Ok(())
-                    }
+                    self.write_binary_file(fc, target)
                 }
             },
         }
@@ -195,11 +203,7 @@ impl GitWriter {
                 }
             }
             FileChangeKind::Binary => {
-                if let Some(after) = fc.after.as_ref() {
-                    self.write_file(target, after)
-                } else {
-                    Ok(())
-                }
+                self.write_binary_file(fc, target)
             }
         }
     }
@@ -239,11 +243,7 @@ impl GitWriter {
             }
             FileChangeKind::Delete => self.delete_file(target),
             FileChangeKind::Binary => {
-                if let Some(after) = fc.after.as_ref() {
-                    self.write_file(target, after)
-                } else {
-                    Ok(())
-                }
+                self.write_binary_file(fc, target)
             }
         }
     }
@@ -485,6 +485,59 @@ mod tests {
     use chrono::NaiveDate;
 
     use super::*;
+
+    fn binary_change(payload: Option<Vec<u8>>) -> FileChange {
+        FileChange {
+            path: "report.xlsx".into(),
+            target_path: Some("report.xlsx".into()),
+            kind: FileChangeKind::Binary,
+            old_path: None,
+            before: None,
+            after: None,
+            source_after: None,
+            after_bytes: payload,
+            source_ref: Some("svn:42".into()),
+            patch: None,
+            conflict_risk: None,
+            analysis: None,
+        }
+    }
+
+    #[test]
+    fn writes_binary_content_without_text_decoding() {
+        let dir = std::env::temp_dir().join(format!("relay-binary-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let writer = GitWriter {
+            repo_path: dir.to_string_lossy().into_owned(),
+        };
+        let payload = vec![0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0x80];
+
+        writer
+            .apply_file_with_strategy(
+                &binary_change(Some(payload.clone())),
+                IntegrationStrategy::WriteAfter,
+            )
+            .unwrap();
+
+        assert_eq!(std::fs::read(dir.join("report.xlsx")).unwrap(), payload);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_binary_change_without_content() {
+        let writer = GitWriter {
+            repo_path: std::env::temp_dir().to_string_lossy().into_owned(),
+        };
+
+        let err = writer
+            .apply_file_with_strategy(
+                &binary_change(None),
+                IntegrationStrategy::WriteAfter,
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("binary content missing"));
+    }
 
     #[test]
     fn formats_migration_branch_name_with_milliseconds() {
