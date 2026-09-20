@@ -10,7 +10,7 @@ use crate::{
     preview::git_wc::resolve_wc_path,
     preview::patch_apply::apply_unified_patch,
     store::models::IntegrationStrategy,
-    vcs::svn::{run_svn, SvnCredentials},
+    vcs::svn::{decode_svn_output, run_svn, SvnCredentials},
 };
 
 pub struct SvnWriter {
@@ -43,8 +43,8 @@ impl SvnWriter {
         cmd.args(args);
         let output = crate::process::output(&mut cmd)
             .map_err(|e| AppError::Vcs(format!("failed to spawn svn: {e}")))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let stdout = decode_svn_output(&output.stdout);
+        let stderr = decode_svn_output(&output.stderr);
         if output.status.success() {
             Ok(stdout)
         } else {

@@ -13,8 +13,25 @@ pub struct GitReader {
     pub repo_path: String,
 }
 
+fn decode_git_text_output(bytes: &[u8]) -> String {
+    let mut output = String::new();
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        if let Ok(text) = std::str::from_utf8(line) {
+            output.push_str(text);
+            continue;
+        }
+        let (decoded, _, had_errors) = encoding_rs::GBK.decode(line);
+        if had_errors {
+            output.push_str(&String::from_utf8_lossy(line));
+        } else {
+            output.push_str(&decoded);
+        }
+    }
+    output
+}
+
 impl GitReader {
-    fn run_git(&self, args: &[&str]) -> Result<String> {
+    fn run_git_output(&self, args: &[&str]) -> Result<std::process::Output> {
         let mut git_args = vec!["-c", "core.quotePath=false"];
         git_args.extend_from_slice(args);
         let output = crate::process::output(
@@ -23,15 +40,25 @@ impl GitReader {
                 .args(&git_args),
         )
         .map_err(|e| AppError::Vcs(format!("failed to spawn git: {e}")))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if output.status.success() {
-            return Ok(stdout);
+            return Ok(output);
         }
+        let stdout = decode_git_text_output(&output.stdout);
+        let stderr = decode_git_text_output(&output.stderr);
         Err(AppError::Vcs(format!(
             "git {} failed: {stderr}{stdout}",
             args.first().copied().unwrap_or("")
         )))
+    }
+
+    fn run_git(&self, args: &[&str]) -> Result<String> {
+        self.run_git_output(args)
+            .map(|output| decode_git_text_output(&output.stdout))
+    }
+
+    fn run_git_lossy(&self, args: &[&str]) -> Result<String> {
+        self.run_git_output(args)
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     pub fn list_recent_paged(
@@ -107,7 +134,14 @@ pub fn load_changeset_with_meta(reader: &GitReader, meta: ReplayUnitMeta) -> Res
     for fc in &mut files {
         if !matches!(fc.kind, crate::model::FileChangeKind::Delete) {
             let blob_path = fc.path.trim_start_matches('/');
-            if let Ok(content) = reader.run_git(&["show", &format!("{sha}:{blob_path}")]) {
+            let object = format!("{sha}:{blob_path}");
+            let content = if matches!(fc.kind, crate::model::FileChangeKind::Binary) {
+                // Binary payloads still follow the existing path until they are modeled as bytes.
+                reader.run_git_lossy(&["show", &object])
+            } else {
+                reader.run_git(&["show", &object])
+            };
+            if let Ok(content) = content {
                 fc.source_after = Some(content.clone());
                 if fc.kind == crate::model::FileChangeKind::Binary
                     || (fc.kind == crate::model::FileChangeKind::Add && fc.patch.is_none())
@@ -138,5 +172,19 @@ mod tests {
             repo_path: "C:\\repo".into(),
         };
         assert_eq!(reader.repo_path, "C:\\repo");
+    }
+
+    #[test]
+    fn decodes_utf8_paths_and_gbk_patch_content_independently() {
+        let mut output = "diff --git a/中文路径.sql b/中文路径.sql\n".as_bytes().to_vec();
+        let (gbk_content, _, had_errors) = encoding_rs::GBK.encode("+中文内容\n");
+        assert!(!had_errors);
+        output.extend_from_slice(&gbk_content);
+
+        assert!(std::str::from_utf8(&output).is_err());
+        let decoded = decode_git_text_output(&output);
+        assert!(decoded.contains("a/中文路径.sql"));
+        assert!(decoded.contains("+中文内容\n"));
+        assert!(!decoded.contains('\u{fffd}'));
     }
 }

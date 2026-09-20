@@ -187,7 +187,7 @@ artifacts/regression/<run_id>/
 |------|------|
 | `smoke` | `I01-GG`, `I03-GG`, `I04-GG` |
 | `production-safety` | `I01-GG` - `I08-GG`, `D01-GG`, `D03-GG`, `D04-GG-rename`, `D05-GG-binary`, `D06-GG-crlf`, `D07-GG-empty`, `D08-GG-no-final-newline`, `D09-GG-chinese`, `D10-GG-longest-prefix`, Windows 下另含 `D11-GG-case-only-rename`, `E01-GG-partial-unmapped`, `E02-GG-directory-conflict`, `M01-GG-commit-result`, `M02-GG-strict-replay`, `M03-GG-squash`, `M04-GG-squash-empty-message`, `F10-GG-already-expected`, `F11-GG-context-drift-auto-merge`, `F12-GG-already-contained-skip`, `F13-GG-same-region-conflict`, `F14-GG-multiple-candidates-blocked` |
-| `release` | `production-safety` + `SG01-SVN-Git-add`, `SG02-SVN-Git-modify`, `SG03-SVN-Git-move`, `SG04-SVN-Git-multi`, `GS01-Git-SVN-add`, `GS02-Git-SVN-delete`, `GS03-Git-SVN-dirty`, `SS01-SVN-SVN-add`, `SS02-SVN-SVN-delete` |
+| `release` | `production-safety` + `SG01-SVN-Git-add`, `SG02-SVN-Git-modify`, `SG03-SVN-Git-move`, `SG04-SVN-Git-multi`, `SG05-SVN-Git-chinese`, `GS01-Git-SVN-add`, `GS02-Git-SVN-delete`, `GS03-Git-SVN-dirty`, `GS04-Git-SVN-chinese`, `SS01-SVN-SVN-add`, `SS02-SVN-SVN-delete`, `SS03-SVN-SVN-chinese` |
 
 失败时优先查看：
 

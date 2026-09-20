@@ -9,7 +9,7 @@ pub struct SvnCredentials {
 }
 
 /// Decode SVN CLI stdout. On Windows, SVN often uses system ANSI (e.g. GBK) for log messages.
-fn decode_svn_output(bytes: &[u8]) -> String {
+pub(crate) fn decode_svn_output(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_string();
     }
@@ -24,8 +24,22 @@ fn decode_svn_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// Run an SVN subcommand and return stdout on success.
-pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<String> {
+/// `svn diff` may mix system-encoded path headers with file content in its original encoding.
+/// Decode each line independently so a UTF-8 patch body does not force GBK paths through the
+/// lossy UTF-8 fallback (or vice versa).
+fn decode_svn_diff_output(bytes: &[u8]) -> String {
+    let mut output = String::new();
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        output.push_str(&decode_svn_output(line));
+    }
+    output
+}
+
+fn run_svn_output(
+    url: &str,
+    creds: &SvnCredentials,
+    args: &[&str],
+) -> Result<std::process::Output> {
     let mut cmd = crate::process::command("svn");
     // --non-interactive: do not prompt; fail if credentials are missing.
     // Avoid --no-auth-prompt: not supported on older SVN builds (e.g. some Windows installs).
@@ -48,7 +62,7 @@ pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<Strin
         .map_err(|e| AppError::Vcs(format!("failed to spawn svn: {e}")))?;
 
     if output.status.success() {
-        return Ok(decode_svn_output(&output.stdout));
+        return Ok(output);
     }
 
     let stderr = decode_svn_output(&output.stderr);
@@ -58,6 +72,12 @@ pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<Strin
         args.first().copied().unwrap_or(""),
         output.status.code(),
     )))
+}
+
+/// Run an SVN subcommand and return decoded text stdout on success.
+pub fn run_svn(url: &str, creds: &SvnCredentials, args: &[&str]) -> Result<String> {
+    let output = run_svn_output(url, creds, args)?;
+    Ok(decode_svn_output(&output.stdout))
 }
 
 pub fn svn_log_xml(url: &str, creds: &SvnCredentials, limit: usize) -> Result<String> {
@@ -94,7 +114,9 @@ pub fn svn_log_xml_paged(
 }
 
 pub fn svn_diff_revision(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {
-    run_svn(url, creds, &["diff", "-c", &revision.to_string()])
+    let revision = revision.to_string();
+    let output = run_svn_output(url, creds, &["diff", "-c", &revision])?;
+    Ok(decode_svn_diff_output(&output.stdout))
 }
 
 pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {
@@ -148,5 +170,30 @@ mod tests {
         let gbk = [0xB2, 0xE2, 0xCA, 0xD4];
         let text = decode_svn_output(&gbk);
         assert_eq!(text, "测试");
+    }
+
+    #[test]
+    fn decodes_mixed_encoding_diff_line_by_line() {
+        let path = "C:/wc/260818_生态链工单供应商调拨.sql";
+        let (gbk_path, _, had_errors) = encoding_rs::GBK.encode(path);
+        assert!(!had_errors);
+
+        let mut diff = Vec::new();
+        for prefix in ["Index: ", "--- ", "+++ "] {
+            diff.extend_from_slice(prefix.as_bytes());
+            diff.extend_from_slice(&gbk_path);
+            diff.extend_from_slice(b"\t(revision 50894)\r\n");
+        }
+        diff.extend_from_slice(b"@@ -0,0 +1 @@\r\n");
+        diff.extend_from_slice("+中\r\n".as_bytes());
+
+        assert!(std::str::from_utf8(&diff).is_err());
+        let (_, _, whole_buffer_has_errors) = encoding_rs::GBK.decode(&diff);
+        assert!(whole_buffer_has_errors);
+
+        let decoded = decode_svn_diff_output(&diff);
+        assert!(decoded.contains("260818_生态链工单供应商调拨.sql"));
+        assert!(decoded.contains("+中\r\n"));
+        assert!(!decoded.contains('\u{fffd}'));
     }
 }

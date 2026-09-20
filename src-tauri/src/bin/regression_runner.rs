@@ -1354,19 +1354,7 @@ fn write_source_commits(
         return Ok(refs);
     }
 
-    if vcs == VcsKind::Git {
-        write_text(path, vcs.source_rel("src/中文路径.txt"), CHINESE_FILE)?;
-    } else {
-        svn(
-            path,
-            &[
-                "propset",
-                "relay-test",
-                "yes",
-                &vcs.source_rel("src/existing.txt"),
-            ],
-        )?;
-    }
+    write_text(path, vcs.source_rel("src/中文路径.txt"), CHINESE_FILE)?;
     refs.insert(
         "C13-chinese-add".into(),
         commit_ref(path, vcs, "C13-chinese-add")?,
@@ -1632,13 +1620,9 @@ fn svn_add(root: &Path, rel: &str) -> AppResult<()> {
 }
 
 fn svn_add_new(root: &Path) -> AppResult<()> {
-    let status = svn(root, &["status"])?;
-    for line in status.lines() {
-        let trimmed = line.trim();
-        if let Some(path) = trimmed.strip_prefix('?').map(str::trim) {
-            svn(root, &["add", "--parents", path])?;
-        }
-    }
+    // Do not parse `svn status` paths: on Windows they may use the active ANSI code page.
+    // Let SVN discover new files from the ASCII working-copy-relative root instead.
+    svn(root, &["add", "--force", "."])?;
     Ok(())
 }
 
@@ -2298,6 +2282,15 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             c
         },
         success_case(
+            "SG05-SVN-Git-chinese",
+            VcsKind::Svn,
+            VcsKind::Git,
+            vec!["C13-chinese-add"],
+            changed(&[("src/中文路径.txt", ExpectedContent::Text(CHINESE_FILE))]),
+            vec![],
+            1,
+        ),
+        success_case(
             "GS01-Git-SVN-add",
             VcsKind::Git,
             VcsKind::Svn,
@@ -2332,6 +2325,18 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             c
         },
         success_case(
+            "GS04-Git-SVN-chinese",
+            VcsKind::Git,
+            VcsKind::Svn,
+            vec!["C13-chinese-add"],
+            changed(&[(
+                "trunk/src/中文路径.txt",
+                ExpectedContent::Text(CHINESE_FILE),
+            )]),
+            vec![],
+            1,
+        ),
+        success_case(
             "SS01-SVN-SVN-add",
             VcsKind::Svn,
             VcsKind::Svn,
@@ -2350,6 +2355,18 @@ fn vcs_matrix_cases() -> Vec<CaseSpec> {
             1,
         )
         .with_accept_review(),
+        success_case(
+            "SS03-SVN-SVN-chinese",
+            VcsKind::Svn,
+            VcsKind::Svn,
+            vec!["C13-chinese-add"],
+            changed(&[(
+                "trunk/src/中文路径.txt",
+                ExpectedContent::Text(CHINESE_FILE),
+            )]),
+            vec![],
+            1,
+        ),
     ]
 }
 
