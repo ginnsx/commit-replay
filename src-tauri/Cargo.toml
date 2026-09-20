@@ -1,6 +1,6 @@
 [package]
 name = "copy-diff"
-version = "0.3.2"
+version = "0.3.3"
 description = "Cross-VCS commit replay tool"
 authors = []
 edition = "2021"
