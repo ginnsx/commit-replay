@@ -1,0 +1,175 @@
+name: 诊断 SVN 中文路径
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: 在 ${{ matrix.os }} 验证
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-latest
+
+    steps:
+      - name: 安装 SVN 并显示环境
+        shell: pwsh
+        run: |
+          choco install sliksvn --version=1.14.5 --no-progress --yes
+          svn --version --quiet
+          "ImageOS=$env:ImageOS"
+          "ImageVersion=$env:ImageVersion"
+          "Culture=$((Get-Culture).Name)"
+          "SystemLocale=$((Get-WinSystemLocale).Name)"
+          "PowerShellOutputEncoding=$([Console]::OutputEncoding.WebName)"
+          chcp
+
+      - name: 验证中文路径的添加、查询和提交
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-Svn {
+            param([string[]] $Arguments)
+
+            & svn @Arguments
+            if ($LASTEXITCODE -ne 0) {
+              throw "SVN 命令失败：svn $($Arguments -join ' ')"
+            }
+          }
+
+          $root = Join-Path $env:RUNNER_TEMP "svn-unicode-$([guid]::NewGuid())"
+          $repo = Join-Path $root "repo"
+          $workingCopy = Join-Path $root "working-copy"
+          $freshRoot = Join-Path $root "fresh-root"
+          $freshDirect = Join-Path $root "fresh-direct"
+          New-Item -ItemType Directory -Path $root | Out-Null
+
+          & svnadmin create $repo
+          if ($LASTEXITCODE -ne 0) {
+            throw "创建 SVN 仓库失败"
+          }
+
+          $repoUri = [Uri]::new((Resolve-Path $repo).Path).AbsoluteUri.TrimEnd("/")
+          $trunkUri = "$repoUri/trunk"
+          Invoke-Svn -Arguments @("mkdir", $trunkUri, "-m", "initialize trunk")
+          Invoke-Svn -Arguments @("checkout", $trunkUri, $workingCopy)
+
+          $rootAddedPath = "src/中文-整体添加.txt"
+          Push-Location $workingCopy
+          try {
+            New-Item -ItemType Directory -Path "src" | Out-Null
+            [IO.File]::WriteAllText(
+              (Join-Path $workingCopy $rootAddedPath),
+              "中文内容`n",
+              [Text.UTF8Encoding]::new($false)
+            )
+
+            # 先仅向 SVN 传递英文的当前目录，验证仓库本身能否保存中文路径。
+            Invoke-Svn -Arguments @("add", "--force", ".")
+
+            # 保留原始字节，用于区分 SVN 内部丢字与日志解码错误。
+            $stdoutFile = Join-Path $root "status.stdout"
+            $stderrFile = Join-Path $root "status.stderr"
+            $svnExecutable = (Get-Command svn.exe).Source
+            $statusProcess = Start-Process `
+              -FilePath $svnExecutable `
+              -ArgumentList @("status", "--ignore-externals") `
+              -WorkingDirectory $workingCopy `
+              -RedirectStandardOutput $stdoutFile `
+              -RedirectStandardError $stderrFile `
+              -Wait `
+              -PassThru
+
+            "svn status exit code: $($statusProcess.ExitCode)"
+            "svn status text:"
+            Get-Content -Raw $stdoutFile
+            "svn status raw hex:"
+            [Convert]::ToHexString([IO.File]::ReadAllBytes($stdoutFile))
+
+            if ($statusProcess.ExitCode -ne 0) {
+              Get-Content -Raw $stderrFile
+              throw "查询 SVN 状态失败"
+            }
+
+            Invoke-Svn -Arguments @("commit", ".", "-m", "add unicode path from root")
+          }
+          finally {
+            Pop-Location
+          }
+
+          Invoke-Svn -Arguments @("checkout", $trunkUri, $freshRoot)
+          $rootVerified = Test-Path (Join-Path $freshRoot $rootAddedPath)
+
+          # 再把中文路径直接作为 SVN 参数，模拟应用当前的调用方式。
+          $directPath = "src/中文-直接参数.txt"
+          $directStatusExit = -1
+          $directAddExit = -1
+          $directVerified = $false
+          $directFailure = ""
+
+          Push-Location $workingCopy
+          try {
+            [IO.File]::WriteAllText(
+              (Join-Path $workingCopy $directPath),
+              "直接参数测试`n",
+              [Text.UTF8Encoding]::new($false)
+            )
+
+            "direct status output:"
+            & svn status $directPath
+            $directStatusExit = $LASTEXITCODE
+            "direct status exit code: $directStatusExit"
+
+            "direct add output:"
+            & svn add --parents $directPath
+            $directAddExit = $LASTEXITCODE
+            "direct add exit code: $directAddExit"
+
+            if ($directAddExit -eq 0) {
+              Invoke-Svn -Arguments @("commit", ".", "-m", "add unicode path directly")
+            }
+            else {
+              $directFailure = "直接传递中文路径时 svn add 失败"
+            }
+          }
+          catch {
+            $directFailure = $_.Exception.Message
+          }
+          finally {
+            Pop-Location
+          }
+
+          if ($directAddExit -eq 0 -and [string]::IsNullOrEmpty($directFailure)) {
+            try {
+              Invoke-Svn -Arguments @("checkout", $trunkUri, $freshDirect)
+              $directVerified = Test-Path (Join-Path $freshDirect $directPath)
+              if (-not $directVerified) {
+                $directFailure = "直接添加看似成功，但重新检出后文件不存在"
+              }
+            }
+            catch {
+              $directFailure = $_.Exception.Message
+            }
+          }
+
+          @"
+          ### SVN 中文路径诊断
+
+          - 运行环境：${{ matrix.os }}
+          - 整体添加并重新检出：$rootVerified
+          - 直接查询中文路径退出码：$directStatusExit
+          - 直接添加中文路径退出码：$directAddExit
+          - 直接添加并重新检出：$directVerified
+          - 失败原因：$directFailure
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+          if (-not $rootVerified) {
+            throw "SVN 仓库无法保存或恢复中文路径"
+          }
+          if (-not $directVerified) {
+            throw "直接传递中文路径失败：$directFailure"
+          }
