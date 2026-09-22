@@ -82,6 +82,11 @@ pub fn derive_after(
         FileChangeKind::Delete => Ok(None),
         FileChangeKind::Binary => Ok(None),
         FileChangeKind::Add => {
+            if before.is_none() {
+                if let Some(source_after) = source_after {
+                    return Ok(Some(source_after.to_string()));
+                }
+            }
             let patch = patch.ok_or_else(|| AppError::Vcs("add change missing patch".into()))?;
             Ok(Some(apply_patch_or_lines(before, patch, source_after)?))
         }
@@ -195,5 +200,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(after, "header\nalpha\nnew\nomega\nfooter\n");
+    }
+
+    #[test]
+    fn derive_added_file_from_source_when_svn_copy_has_no_patch() {
+        let after =
+            derive_after(None, None, &FileChangeKind::Add, Some("copied content\n")).unwrap();
+
+        assert_eq!(after.as_deref(), Some("copied content\n"));
     }
 }

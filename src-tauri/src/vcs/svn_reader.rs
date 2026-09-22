@@ -87,7 +87,8 @@ fn load_summary_file(
     revision: u64,
     entry: SvnDiffSummaryEntry,
 ) -> Result<FileChange> {
-    let peg_revision = if matches!(entry.kind, FileChangeKind::Delete) {
+    let summary_kind = entry.kind.clone();
+    let peg_revision = if matches!(summary_kind, FileChangeKind::Delete) {
         revision.saturating_sub(1).max(1)
     } else {
         revision
@@ -108,8 +109,21 @@ fn load_summary_file(
         conflict_risk: None,
         analysis: None,
     });
-    if !matches!(file.kind, FileChangeKind::Binary) {
-        file.kind = entry.kind;
+    if matches!(summary_kind, FileChangeKind::Delete) {
+        file.kind = FileChangeKind::Delete;
+    } else if matches!(file.kind, FileChangeKind::Binary) {
+        if let Ok(content) = svn_cat_file_bytes(&reader.creds(), revision, &entry.url) {
+            match String::from_utf8(content) {
+                Ok(text) => {
+                    // SlikSVN 可能把含中文的 UTF-8 文本误报为二进制，以实际内容为准。
+                    file.kind = summary_kind;
+                    file.source_after = Some(text);
+                }
+                Err(error) => file.after_bytes = Some(error.into_bytes()),
+            }
+        }
+    } else {
+        file.kind = summary_kind;
     }
     file.path = entry.path;
     file.old_path = None;
