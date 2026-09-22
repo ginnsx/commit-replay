@@ -132,9 +132,10 @@ jobs:
           $summaryXmlText = [Text.Encoding]::UTF8.GetString(
             [IO.File]::ReadAllBytes($summaryXmlFile)
           )
+          $summaryXmlDecoded = [Uri]::UnescapeDataString($summaryXmlText)
           $summaryXmlPreservesChinese = `
             $summaryProcess.ExitCode -eq 0 -and `
-            $summaryXmlText.Contains("中文-整体添加.txt")
+            $summaryXmlDecoded.Contains("中文-整体添加.txt")
           "svn diff summary XML preserves chinese: $summaryXmlPreservesChinese"
           $summaryXmlText
 
@@ -262,6 +263,37 @@ jobs:
           if (-not $logXmlPreservesChinese -or -not $summaryXmlPreservesChinese) {
             throw "SVN XML 输出未保留中文路径"
           }
-          if (-not $targetsVerified) {
-            throw "UTF-8 目标文件方案失败：$targetsFailure"
-          }
+
+  regression:
+    name: 在 ${{ matrix.os }} 运行中文路径迁移回归
+    needs: probe
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 SVN
+        shell: pwsh
+        run: |
+          choco install sliksvn --version=1.14.5 --no-progress --yes
+          svn --version --quiet
+
+      - name: 运行 SVN 单元检查
+        working-directory: src-tauri
+        run: cargo test vcs::svn
+
+      - name: 运行完整迁移回归
+        shell: pwsh
+        run: npm run test:regression:release

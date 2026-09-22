@@ -124,6 +124,26 @@ pub fn svn_diff_revision(url: &str, creds: &SvnCredentials, revision: u64) -> Re
     Ok(decode_svn_diff_output(&output.stdout))
 }
 
+pub fn svn_diff_summary_xml(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {
+    run_svn(
+        url,
+        creds,
+        &["diff", "--summarize", "--xml", "-c", &revision.to_string()],
+    )
+}
+
+pub fn svn_diff_file_revision(
+    file_url: &str,
+    creds: &SvnCredentials,
+    revision: u64,
+    peg_revision: u64,
+) -> Result<String> {
+    let target = format!("{file_url}@{peg_revision}");
+    let revision = revision.to_string();
+    let output = run_svn_output(&target, creds, &["diff", "-c", &revision])?;
+    Ok(decode_svn_diff_output(&output.stdout))
+}
+
 pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) -> Result<String> {
     run_svn(
         url,
@@ -133,11 +153,8 @@ pub fn svn_log_revision_xml(url: &str, creds: &SvnCredentials, revision: u64) ->
 }
 
 pub fn svn_cat_file(creds: &SvnCredentials, revision: u64, file_path: &str) -> Result<String> {
-    run_svn(
-        file_path,
-        creds,
-        &["cat", "-r", &revision.to_string()],
-    )
+    let target = format!("{file_path}@{revision}");
+    run_svn(&target, creds, &["cat", "-r", &revision.to_string()])
 }
 
 pub fn svn_cat_file_bytes(
@@ -145,11 +162,8 @@ pub fn svn_cat_file_bytes(
     revision: u64,
     file_path: &str,
 ) -> Result<Vec<u8>> {
-    run_svn_bytes(
-        file_path,
-        creds,
-        &["cat", "-r", &revision.to_string()],
-    )
+    let target = format!("{file_path}@{revision}");
+    run_svn_bytes(&target, creds, &["cat", "-r", &revision.to_string()])
 }
 
 pub fn svn_info_xml(wc_path: &str) -> Result<String> {
@@ -178,7 +192,10 @@ mod tests {
 
     #[test]
     fn decodes_valid_utf8() {
-        assert_eq!(decode_svn_output(b"<?xml version=\"1.0\"?>"), "<?xml version=\"1.0\"?>");
+        assert_eq!(
+            decode_svn_output(b"<?xml version=\"1.0\"?>"),
+            "<?xml version=\"1.0\"?>"
+        );
     }
 
     #[test]

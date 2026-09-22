@@ -1,13 +1,15 @@
 use crate::{
     error::{AppError, Result},
-    model::{ChangeSet, ReplayUnitMeta},
+    model::{ChangeSet, FileChange, FileChangeKind, ReplayUnitMeta},
 };
 
-use super::VcsReader;
 use super::svn::{
-    parse_log_xml, parse_svn_revision, parse_unified_diff, probe_svn_wc, svn_cat_file,
-    svn_cat_file_bytes, svn_diff_revision, svn_log_revision_xml, svn_log_xml_paged, SvnCredentials,
+    encoded_child_url, parse_diff_summary_xml, parse_log_xml, parse_svn_revision,
+    parse_unified_diff, probe_svn_wc, svn_cat_file, svn_cat_file_bytes, svn_diff_file_revision,
+    svn_diff_summary_xml, svn_log_revision_xml, svn_log_xml_paged, SvnCredentials,
+    SvnDiffSummaryEntry,
 };
+use super::VcsReader;
 
 #[derive(Clone)]
 pub struct SvnReader {
@@ -33,9 +35,10 @@ impl SvnReader {
         let url = self.repo_url()?;
         let xml = svn_log_revision_xml(&url, &self.creds(), revision)?;
         let entries = parse_log_xml(&xml)?;
-        entries.into_iter().next().ok_or_else(|| {
-            AppError::Vcs(format!("no log entry for revision {revision}"))
-        })
+        entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::Vcs(format!("no log entry for revision {revision}")))
     }
 
     pub fn list_recent_paged(
@@ -62,8 +65,13 @@ impl VcsReader for SvnReader {
 
 pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Result<ChangeSet> {
     let revision = parse_svn_revision(&meta.source_ref)?;
-    let diff = svn_diff_revision(&reader.wc_path, &reader.creds(), revision)?;
-    let mut files = parse_unified_diff(&diff, Some(&reader.wc_path))?;
+    let branch_url = reader.repo_url()?;
+    let summary_xml = svn_diff_summary_xml(&branch_url, &reader.creds(), revision)?;
+    let summary = parse_diff_summary_xml(&summary_xml, &branch_url)?;
+    let mut files = Vec::with_capacity(summary.len());
+    for entry in summary {
+        files.push(load_summary_file(reader, revision, entry)?);
+    }
     tag_source_ref(&mut files, &meta.source_ref);
     Ok(ChangeSet {
         meta: ReplayUnitMeta {
@@ -72,6 +80,40 @@ pub fn load_changeset_with_meta(reader: &SvnReader, meta: ReplayUnitMeta) -> Res
         },
         files,
     })
+}
+
+fn load_summary_file(
+    reader: &SvnReader,
+    revision: u64,
+    entry: SvnDiffSummaryEntry,
+) -> Result<FileChange> {
+    let peg_revision = if matches!(entry.kind, FileChangeKind::Delete) {
+        revision.saturating_sub(1).max(1)
+    } else {
+        revision
+    };
+    let diff = svn_diff_file_revision(&entry.url, &reader.creds(), revision, peg_revision)?;
+    let mut parsed = parse_unified_diff(&diff, None)?;
+    let mut file = parsed.pop().unwrap_or_else(|| FileChange {
+        path: entry.path.clone(),
+        target_path: None,
+        kind: entry.kind.clone(),
+        old_path: None,
+        before: None,
+        after: None,
+        source_after: None,
+        after_bytes: None,
+        source_ref: None,
+        patch: None,
+        conflict_risk: None,
+        analysis: None,
+    });
+    if !matches!(file.kind, FileChangeKind::Binary) {
+        file.kind = entry.kind;
+    }
+    file.path = entry.path;
+    file.old_path = None;
+    Ok(file)
 }
 
 pub fn tag_source_ref(files: &mut [crate::model::FileChange], source_ref: &str) {
@@ -85,26 +127,21 @@ pub fn attach_source_after_file(
     revision: u64,
     fc: &mut crate::model::FileChange,
 ) {
-    use crate::model::FileChangeKind;
-    use std::path::Path;
-
     if fc.source_after.is_some() || fc.after_bytes.is_some() {
         return;
     }
     if matches!(fc.kind, FileChangeKind::Delete) {
         return;
     }
-    let rel = fc.path.trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR);
-    let file_path = Path::new(&reader.wc_path).join(rel);
+    let Ok(branch_url) = reader.repo_url() else {
+        return;
+    };
+    let file_url = encoded_child_url(&branch_url, &fc.path);
     if matches!(fc.kind, FileChangeKind::Binary) {
-        if let Ok(content) =
-            svn_cat_file_bytes(&reader.creds(), revision, &file_path.to_string_lossy())
-        {
+        if let Ok(content) = svn_cat_file_bytes(&reader.creds(), revision, &file_url) {
             fc.after_bytes = Some(content);
         }
-    } else if let Ok(content) =
-        svn_cat_file(&reader.creds(), revision, &file_path.to_string_lossy())
-    {
+    } else if let Ok(content) = svn_cat_file(&reader.creds(), revision, &file_url) {
         fc.source_after = Some(content);
     }
 }

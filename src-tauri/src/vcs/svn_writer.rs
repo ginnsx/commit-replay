@@ -89,15 +89,10 @@ impl SvnWriter {
         Ok(())
     }
 
-    fn schedule_add_if_needed(&self, rel_path: &str) -> Result<()> {
-        let arg = rel_path.replace('\\', "/");
-        let status = self.run_svn_wc(&["status", &arg])?;
-        if status
-            .lines()
-            .any(|line| line.trim_start().starts_with('?'))
-        {
-            self.run_svn_wc(&["add", "--parents", &arg])?;
-        }
+    fn schedule_add_if_needed(&self, _rel_path: &str) -> Result<()> {
+        // SlikSVN 会按系统代码页损坏中文命令行参数；只传递 ASCII 的当前目录。
+        // prepare 已确保开始时没有未跟踪文件，因此整体扫描只会登记本次写入的文件。
+        self.run_svn_wc(&["add", "--force", "."])?;
         Ok(())
     }
 
@@ -172,9 +167,7 @@ impl SvnWriter {
                         Ok(())
                     }
                 }
-                FileChangeKind::Binary => {
-                    self.write_binary_file(fc, target)
-                }
+                FileChangeKind::Binary => self.write_binary_file(fc, target),
             },
         }
     }
@@ -209,9 +202,7 @@ impl SvnWriter {
                     Ok(())
                 }
             }
-            FileChangeKind::Binary => {
-                self.write_binary_file(fc, target)
-            }
+            FileChangeKind::Binary => self.write_binary_file(fc, target),
         }
     }
 
@@ -249,9 +240,7 @@ impl SvnWriter {
                 }
             }
             FileChangeKind::Delete => self.delete_file(target),
-            FileChangeKind::Binary => {
-                self.write_binary_file(fc, target)
-            }
+            FileChangeKind::Binary => self.write_binary_file(fc, target),
         }
     }
 
@@ -315,18 +304,7 @@ impl SvnWriter {
 impl VcsWriter for SvnWriter {
     fn prepare(&self, _branch: &str) -> Result<VcsCheckpoint> {
         let status = self.run_svn(&["status", "--ignore-externals"])?;
-        let dirty: Vec<&str> = status
-            .lines()
-            .filter(|l| {
-                let l = l.trim();
-                !l.is_empty() && !l.starts_with('?')
-            })
-            .collect();
-        if !dirty.is_empty() {
-            return Err(AppError::Validation(
-                "target working copy is not clean".into(),
-            ));
-        }
+        ensure_clean_status(&status)?;
         let rev = self
             .run_svn(&["info", "--show-item", "revision"])?
             .trim()
@@ -404,6 +382,15 @@ impl VcsWriter for SvnWriter {
     }
 }
 
+fn ensure_clean_status(status: &str) -> Result<()> {
+    if status.lines().any(|line| !line.trim().is_empty()) {
+        return Err(AppError::Validation(
+            "target working copy is not clean, including untracked files".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn parse_commit_revision(output: &str) -> Result<String> {
     for line in output.lines() {
         if let Some(rest) = line.strip_prefix("Committed revision ") {
@@ -437,4 +424,20 @@ fn walk(path: &Path, out: &mut Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_status_accepts_empty_output() {
+        assert!(ensure_clean_status("\r\n").is_ok());
+    }
+
+    #[test]
+    fn clean_status_rejects_untracked_files() {
+        let error = ensure_clean_status("?       local-only.txt\r\n").unwrap_err();
+        assert!(error.to_string().contains("not clean"));
+    }
 }
