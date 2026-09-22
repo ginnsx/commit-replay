@@ -263,6 +263,8 @@ jobs:
           if (-not $logXmlPreservesChinese -or -not $summaryXmlPreservesChinese) {
             throw "SVN XML 输出未保留中文路径"
           }
+          # 前面故意执行了预期失败的直接传参实验，避免其退出码污染整个步骤。
+          exit 0
 
   regression:
     name: 在 ${{ matrix.os }} 运行中文路径迁移回归
