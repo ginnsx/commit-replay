@@ -46,6 +46,7 @@ jobs:
           $workingCopy = Join-Path $root "working-copy"
           $freshRoot = Join-Path $root "fresh-root"
           $freshDirect = Join-Path $root "fresh-direct"
+          $freshTargets = Join-Path $root "fresh-targets"
           New-Item -ItemType Directory -Path $root | Out-Null
 
           & svnadmin create $repo
@@ -104,6 +105,39 @@ jobs:
           Invoke-Svn -Arguments @("checkout", $trunkUri, $freshRoot)
           $rootVerified = Test-Path (Join-Path $freshRoot $rootAddedPath)
 
+          # XML 输出按标准使用 UTF-8，用它与本地化的普通 diff 输出对比。
+          $logXmlFile = Join-Path $root "log.xml"
+          $logXmlError = Join-Path $root "log.stderr"
+          $logProcess = Start-Process `
+            -FilePath $svnExecutable `
+            -ArgumentList @("log", "--xml", "-v", "-r", "2", $trunkUri) `
+            -RedirectStandardOutput $logXmlFile `
+            -RedirectStandardError $logXmlError `
+            -Wait `
+            -PassThru
+          $logXmlText = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($logXmlFile))
+          $logXmlPreservesChinese = $logProcess.ExitCode -eq 0 -and $logXmlText.Contains("中文-整体添加.txt")
+          "svn log XML preserves chinese: $logXmlPreservesChinese"
+          $logXmlText
+
+          $summaryXmlFile = Join-Path $root "diff-summary.xml"
+          $summaryXmlError = Join-Path $root "diff-summary.stderr"
+          $summaryProcess = Start-Process `
+            -FilePath $svnExecutable `
+            -ArgumentList @("diff", "--summarize", "--xml", "-c", "2", $trunkUri) `
+            -RedirectStandardOutput $summaryXmlFile `
+            -RedirectStandardError $summaryXmlError `
+            -Wait `
+            -PassThru
+          $summaryXmlText = [Text.Encoding]::UTF8.GetString(
+            [IO.File]::ReadAllBytes($summaryXmlFile)
+          )
+          $summaryXmlPreservesChinese = `
+            $summaryProcess.ExitCode -eq 0 -and `
+            $summaryXmlText.Contains("中文-整体添加.txt")
+          "svn diff summary XML preserves chinese: $summaryXmlPreservesChinese"
+          $summaryXmlText
+
           # 再把中文路径直接作为 SVN 参数，模拟应用当前的调用方式。
           $directPath = "src/中文-直接参数.txt"
           $directStatusExit = -1
@@ -156,20 +190,78 @@ jobs:
             }
           }
 
+          # 通过 ASCII 路径的目标文件传入 UTF-8 中文路径，避免直接命令行参数转换。
+          $targetsPath = "src/中文-目标文件.txt"
+          $targetsFile = Join-Path $root "targets-utf8.txt"
+          [IO.File]::WriteAllText(
+            $targetsFile,
+            "$targetsPath`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+          [IO.File]::WriteAllText(
+            (Join-Path $workingCopy $targetsPath),
+            "目标文件测试`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+
+          $targetsAddExit = -1
+          $targetsVerified = $false
+          $targetsFailure = ""
+          Push-Location $workingCopy
+          try {
+            "targets file add output:"
+            & svn add --parents --targets $targetsFile
+            $targetsAddExit = $LASTEXITCODE
+            "targets file add exit code: $targetsAddExit"
+            if ($targetsAddExit -eq 0) {
+              Invoke-Svn -Arguments @("commit", ".", "-m", "add unicode path from targets file")
+            }
+            else {
+              $targetsFailure = "UTF-8 目标文件无法添加中文路径"
+            }
+          }
+          catch {
+            $targetsFailure = $_.Exception.Message
+          }
+          finally {
+            Pop-Location
+          }
+
+          if ($targetsAddExit -eq 0 -and [string]::IsNullOrEmpty($targetsFailure)) {
+            try {
+              Invoke-Svn -Arguments @("checkout", $trunkUri, $freshTargets)
+              $targetsVerified = Test-Path (Join-Path $freshTargets $targetsPath)
+              if (-not $targetsVerified) {
+                $targetsFailure = "目标文件添加看似成功，但重新检出后文件不存在"
+              }
+            }
+            catch {
+              $targetsFailure = $_.Exception.Message
+            }
+          }
+
           @"
           ### SVN 中文路径诊断
 
           - 运行环境：${{ matrix.os }}
           - 整体添加并重新检出：$rootVerified
+          - 日志 XML 保留中文：$logXmlPreservesChinese
+          - 差异摘要 XML 保留中文：$summaryXmlPreservesChinese
           - 直接查询中文路径退出码：$directStatusExit
           - 直接添加中文路径退出码：$directAddExit
           - 直接添加并重新检出：$directVerified
-          - 失败原因：$directFailure
+          - UTF-8 目标文件添加退出码：$targetsAddExit
+          - UTF-8 目标文件添加并重新检出：$targetsVerified
+          - 直接传参失败原因：$directFailure
+          - 目标文件失败原因：$targetsFailure
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
 
           if (-not $rootVerified) {
             throw "SVN 仓库无法保存或恢复中文路径"
           }
-          if (-not $directVerified) {
-            throw "直接传递中文路径失败：$directFailure"
+          if (-not $logXmlPreservesChinese -or -not $summaryXmlPreservesChinese) {
+            throw "SVN XML 输出未保留中文路径"
+          }
+          if (-not $targetsVerified) {
+            throw "UTF-8 目标文件方案失败：$targetsFailure"
           }
